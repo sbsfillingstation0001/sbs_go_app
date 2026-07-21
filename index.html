@@ -248,7 +248,8 @@ let docExistsOnServer = false;
 function queueFieldSync(path, value) {
   pendingFieldUpdates[path] = value;
   if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-  cloudSyncTimer = setTimeout(flushFieldSync, 700);
+  // Pehle 700 tha, ab 200 kar diya hai taaki turant sync ho
+  cloudSyncTimer = setTimeout(flushFieldSync, 200); 
 }
 
 let syncWatchdogTimer = null;
@@ -448,6 +449,7 @@ function defaultState() {
 
 let state = loadState();
 migrateLegacyCollections();
+render();
 let activeTab = 'dashboard';
 let activeShiftTab = 'morning';
 let selectedEntryDate = todayStr();
@@ -771,9 +773,13 @@ function runFIFOEngine() {
   return { perDateProfit, lotRemaining };
 }
 function getBookStock(fuelType, uptoDate) {
+  // Initial stock add kiya taaki exact remaining quantity dikhe
+  const initial = fuelType === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 0) : (parseFloat(state.settings.initialDieselStock) || 0);
+  
   const delivered = Object.values(state.deliveries)
     .filter(d => d.fuelType === fuelType && d.date <= uptoDate)
     .reduce((sum,d) => sum + (parseFloat(d.liters)||0), 0);
+    
   let dispensed = 0;
   Object.keys(state.dailyRecords).forEach(date => {
     if (date <= uptoDate) {
@@ -787,7 +793,7 @@ function getBookStock(fuelType, uptoDate) {
       });
     }
   });
-  return delivered - dispensed;
+  return initial + delivered - dispensed; // Initial stock yaha jude ga
 }
 function getRemainingStock() {
   let petrolDelivered = 0, dieselDelivered = 0;
@@ -1067,11 +1073,14 @@ function getLatestEntryDate() {
     const rec = state.dailyRecords[d];
     if (!rec) return false;
     const hasExpenses = rec.expenses && Object.keys(rec.expenses).length > 0;
-    const hasDip = rec.dip && ((rec.dip.petrolDipCm !== null && rec.dip.petrolDipCm !== undefined) || (rec.dip.dieselDipMm !== null && rec.dip.dieselDipMm !== undefined));
+    // Strict null checks to prevent crashes
+    const hasDip = rec.dip && ((rec.dip.petrolDipCm !== null && rec.dip.petrolDipCm !== undefined && rec.dip.petrolDipCm !== '') || 
+                               (rec.dip.dieselDipMm !== null && rec.dip.dieselDipMm !== undefined && rec.dip.dieselDipMm !== ''));
     return shiftHasRealData(rec.morning) || shiftHasRealData(rec.evening) || hasExpenses || hasDip;
   }).sort();
+  
   if (dates.length === 0) return todayStr();
-  return dates[dates.length - 1];
+  return dates[dates.length - 1]; // Sabse latest jisme data ho
 }
 function getMonthlyRevenue(monthKeyStr) {
   let total = 0;
@@ -1167,6 +1176,7 @@ function getDateRangeForPeriod(period) {
 function computePeriodSummary(startDate, endDate) {
   const { perDateProfit } = runFIFOEngine();
   let revenue = 0, expense = 0, grossProfit = 0, petrolL = 0, dieselL = 0, totalCash = 0, totalUpi = 0;
+  
   Object.keys(state.dailyRecords).forEach(function(date) {
     if (date >= startDate && date <= endDate) {
       const totals = computeDayTotals(date);
@@ -1179,15 +1189,16 @@ function computePeriodSummary(startDate, endDate) {
       grossProfit += (perDateProfit[date] || 0);
     }
   });
-  const netProfit = grossProfit - expense;
+  
+  const netProfit = grossProfit - expense; // Salary minus hata diya
   const daysInRange = Math.max(1, daysBetweenInclusive(startDate, endDate));
-  const totalMonthlySalary = getTotalMonthlySalary();
-  const approxDaysInMonth = getDaysInMonth(monthKey(endDate));
-  const dailySalaryRate = approxDaysInMonth > 0 ? totalMonthlySalary / approxDaysInMonth : 0;
-  const salaryForPeriod = dailySalaryRate * daysInRange;
-  const profitAfterSalary = netProfit - salaryForPeriod;
   const stock = getRemainingStock();
-  return { revenue, expense, grossProfit, netProfit, salaryForPeriod, profitAfterSalary, petrolL, dieselL, daysInRange, totalCash, totalUpi, remainingPetrolStock: stock.petrol, remainingDieselStock: stock.diesel };
+  
+  // Outstanding aur total udhari direct states se nikal li
+  const totalUdhari = getTotalUdhariGivenAllTime();
+  const outstandingUdhari = getTotalOutstandingUdhari();
+  
+  return { revenue, expense, grossProfit, netProfit, petrolL, dieselL, daysInRange, totalCash, totalUpi, remainingPetrolStock: stock.petrol, remainingDieselStock: stock.diesel, totalUdhari, outstandingUdhari };
 }
 function onSummaryPeriodChange(period) {
   selectedSummaryPeriod = period;
@@ -2576,7 +2587,93 @@ function generateCustomerStatementPDF(customerId) {
     alert('PDF banane mein dikkat aayi: ' + err.message);
   }
 }
+function generateSummaryPDF() {
+  const range = getDateRangeForPeriod(selectedSummaryPeriod);
+  const s = computePeriodSummary(range.start, range.end);
+  
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const marginX = 15;
+  let y = 20;
 
+  doc.setFillColor(10, 37, 64);
+  doc.rect(0, 0, 210, 3, 'F');
+  
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('SBS FILLING STATION - BUSINESS SUMMARY', 105, y, { align: 'center' });
+  y += 10;
+  
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Period: ' + formatDateDisplay(range.start) + ' to ' + formatDateDisplay(range.end), 105, y, { align: 'center' });
+  y += 15;
+
+  doc.autoTable({
+    startY: y,
+    head: [['Description', 'Amount / Volume']],
+    body: [
+      ['Total Revenue', formatCurrency(s.revenue)],
+      ['Total Expenses', formatCurrency(s.expense)],
+      ['Net Profit', formatCurrency(s.netProfit)],
+      ['Cash Received', formatCurrency(s.totalCash)],
+      ['UPI Received', formatCurrency(s.totalUpi)],
+      ['Total Udhari Given (All Time)', formatCurrency(s.totalUdhari)],
+      ['Outstanding Udhari', formatCurrency(s.outstandingUdhari)],
+      ['Petrol Sold', formatNum(s.petrolL) + ' L'],
+      ['Diesel Sold', formatNum(s.dieselL) + ' L']
+    ],
+    theme: 'grid',
+    headStyles: { fillColor: [10, 37, 64], textColor: 255 },
+    styles: { fontSize: 11, cellPadding: 4 }
+  });
+  
+  doc.save('Business_Report_' + range.start + '.pdf');
+}
+
+function generateExpensesPDF() {
+  const range = getDateRangeForPeriod(selectedSummaryPeriod);
+  
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  let y = 20;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('SBS FILLING STATION - EXPENSE REPORT', 105, y, { align: 'center' });
+  y += 10;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Period: ' + formatDateDisplay(range.start) + ' to ' + formatDateDisplay(range.end), 105, y, { align: 'center' });
+  y += 15;
+
+  let expenseRows = [];
+  let totalExpense = 0;
+  
+  Object.keys(state.dailyRecords).sort().forEach(date => {
+    if (date >= range.start && date <= range.end) {
+      const exps = state.dailyRecords[date].expenses;
+      if (exps) {
+        Object.values(exps).forEach(ex => {
+          expenseRows.push([formatDateDisplay(date), ex.description, formatCurrency(ex.amount)]);
+          totalExpense += parseFloat(ex.amount) || 0;
+        });
+      }
+    }
+  });
+
+  doc.autoTable({
+    startY: y,
+    head: [['Date', 'Description', 'Amount']],
+    body: expenseRows.length ? expenseRows : [['-', 'No expenses found', '-']],
+    foot: [['', 'Total Expense', formatCurrency(totalExpense)]],
+    theme: 'grid',
+    headStyles: { fillColor: [245, 166, 35], textColor: [10, 37, 64] },
+    footStyles: { fillColor: [238, 241, 245], textColor: [10, 37, 64], fontStyle: 'bold' }
+  });
+  
+  doc.save('Expense_Report_' + range.start + '.pdf');
+}
 /* =========================================================
    RENDER: REPORTS
 ========================================================= */
@@ -2590,7 +2687,7 @@ function renderReports() {
     { id: 'year', label: 'Yearly' },
     { id: 'custom', label: 'Custom' }
   ];
-  const summarySection = `
+ const summarySection = `
     <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5 no-print">
       <h2 class="text-base font-bold mb-3">📤 Business Summary Report (Share on WhatsApp)</h2>
       <div class="flex flex-wrap gap-2 mb-3">
@@ -2615,50 +2712,64 @@ function renderReports() {
       ` : ''}
       <p class="text-xs text-[#5A6B82] mb-4">${formatDateDisplay(summaryRange.start)} to ${formatDateDisplay(summaryRange.end)} (${summary.daysInRange} days)</p>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Revenue</div>
-          <div class="font-extrabold text-[#0A2540]">${formatCurrency(summary.revenue)}</div>
+          <div class="font-extrabold text-[#0A2540]">\${formatCurrency(summary.revenue)}</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Expenses</div>
-          <div class="font-extrabold text-red-600">${formatCurrency(summary.expense)}</div>
+          <div class="font-extrabold text-red-600">\${formatCurrency(summary.expense)}</div>
         </div>
-        <div class="bg-[#EEF1F5] rounded-lg p-3">
-          <div class="text-[10px] text-[#5A6B82] uppercase">Profit (Before Salary)</div>
-          <div class="font-extrabold text-[#0A2540]">${formatCurrency(summary.netProfit)}</div>
-        </div>
-        <div class="bg-[#0A2540] rounded-lg p-3 text-white col-span-2 sm:col-span-1">
-          <div class="text-[10px] text-blue-200 uppercase">Salary Adjusted Profit</div>
-          <div class="font-extrabold ${summary.profitAfterSalary < 0 ? 'text-red-400' : 'text-green-400'}">${formatCurrency(summary.profitAfterSalary)}</div>
+        <div class="bg-[#0A2540] rounded-lg p-3 text-white col-span-2">
+          <div class="text-[10px] text-blue-200 uppercase">Net Profit</div>
+          <div class="font-extrabold ${summary.netProfit < 0 ? 'text-red-400' : 'text-green-400'}">\${formatCurrency(summary.netProfit)}</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Petrol Sold</div>
-          <div class="font-extrabold text-orange-600">${formatNum(summary.petrolL)} L</div>
+          <div class="font-extrabold text-orange-600">\${formatNum(summary.petrolL)} L</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Diesel Sold</div>
-          <div class="font-extrabold text-blue-700">${formatNum(summary.dieselL)} L</div>
+          <div class="font-extrabold text-blue-700">\${formatNum(summary.dieselL)} L</div>
         </div>
         <div class="bg-emerald-50 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Cash Received</div>
-          <div class="font-extrabold text-emerald-700">${formatCurrency(summary.totalCash)}</div>
+          <div class="font-extrabold text-emerald-700">\${formatCurrency(summary.totalCash)}</div>
         </div>
         <div class="bg-indigo-50 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">UPI Received</div>
-          <div class="font-extrabold text-indigo-700">${formatCurrency(summary.totalUpi)}</div>
+          <div class="font-extrabold text-indigo-700">\${formatCurrency(summary.totalUpi)}</div>
         </div>
       </div>
 
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div class="bg-white border border-orange-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Remaining Petrol Stock (as of now)</div>
-          <div class="font-extrabold text-orange-600">${formatNum(summary.remainingPetrolStock)} L</div>
+          <div class="font-extrabold text-orange-600">\${formatNum(summary.remainingPetrolStock)} L</div>
         </div>
         <div class="bg-white border border-blue-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Remaining Diesel Stock (as of now)</div>
-          <div class="font-extrabold text-blue-700">${formatNum(summary.remainingDieselStock)} L</div>
+          <div class="font-extrabold text-blue-700">\${formatNum(summary.remainingDieselStock)} L</div>
         </div>
+      </div>
+
+      <!-- YAHAN NAYA UDHARI SECTION HAIN -->
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="bg-white border border-red-200 rounded-lg p-3">
+          <div class="text-[10px] text-[#5A6B82] uppercase">Total Udhari Given</div>
+          <div class="font-extrabold text-[#0A2540]">\${formatCurrency(summary.totalUdhari)}</div>
+        </div>
+        <div class="bg-white border border-red-200 rounded-lg p-3">
+          <div class="text-[10px] text-[#5A6B82] uppercase">Outstanding Udhari</div>
+          <div class="font-extrabold text-red-600">\${formatCurrency(summary.outstandingUdhari)}</div>
+        </div>
+      </div>
+
+      <!-- YAHAN PDF BUTTONS HAIN -->
+      <div class="flex flex-col sm:flex-row gap-3 mb-4">
+        <button onclick="generateSummaryPDF()" class="flex-1 bg-[#F5A623] text-[#0A2540] font-bold px-5 py-2.5 rounded-lg text-sm">📄 Download Business PDF</button>
+        <button onclick="generateExpensesPDF()" class="flex-1 bg-[#0A2540] text-white font-bold px-5 py-2.5 rounded-lg text-sm">📄 Download Expenses PDF</button>
       </div>
 
       <button onclick="shareReportToWhatsApp()" class="w-full sm:w-auto bg-green-600 text-white font-bold px-5 py-2.5 rounded-lg">📤 Share Report on WhatsApp</button>
