@@ -58,6 +58,7 @@
   }
   @keyframes preloaderSpin { to { transform: rotate(360deg); } }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body class="text-[#0A2540]">
 <div id="app"><div id="preloader">
@@ -2688,7 +2689,7 @@ function renderReports() {
     { id: 'custom', label: 'Custom' }
   ];
 const summarySection = `
-    <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5 no-print">
+    <div id="pdf-content" class="bg-white rounded-2xl card-shadow p-4 sm:p-5 no-print">
       <h2 class="text-base font-bold mb-3">📊 Business Summary Report</h2>
       <div class="flex flex-wrap gap-2 mb-3">
         ${periodButtons.map(p => `
@@ -2754,7 +2755,6 @@ const summarySection = `
         </div>
       </div>
 
-      <!-- YAHAN NAYA UDHARI SECTION HAIN -->
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div class="bg-white border border-red-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Udhari Given</div>
@@ -2766,7 +2766,6 @@ const summarySection = `
         </div>
       </div>
 
-      <!-- YAHAN PDF BUTTONS HAIN -->
       <div class="flex flex-col sm:flex-row gap-3 mb-1">
         <button onclick="generateSummaryPDF()" class="flex-1 bg-[#F5A623] hover:bg-yellow-500 text-[#0A2540] font-bold px-5 py-2.5 rounded-lg text-sm shadow transition-colors">📄 Download Business PDF</button>
         <button onclick="generateExpensesPDF()" class="flex-1 bg-[#0A2540] hover:bg-blue-900 text-white font-bold px-5 py-2.5 rounded-lg text-sm shadow transition-colors">📄 Download Expenses PDF</button>
@@ -2997,6 +2996,25 @@ try { attachCloudListener(); } catch (e) { console.error('attachCloudListener fa
       navigator.serviceWorker.register('sw.js');
     });
   }
+// ... aapki JS file ka upar ka saara lamba code ...
+// ... function init(), updateDashboard() ya event listeners wagera ...
+
+// ⬇️ SABSE AAKHIRI MEIN YAHAN PASTE KARNA HAI ⬇️
+
+function generateSummaryPDF() {
+    const element = document.getElementById('pdf-content'); 
+    
+    const opt = {
+        margin:       0.5,
+        filename:     `Business_Summary_Report.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true }, 
+        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+}
 </script>
+
 </body>
 </html>
