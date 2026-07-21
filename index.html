@@ -2687,9 +2687,9 @@ function renderReports() {
     { id: 'year', label: 'Yearly' },
     { id: 'custom', label: 'Custom' }
   ];
- const summarySection = `
+const summarySection = `
     <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5 no-print">
-      <h2 class="text-base font-bold mb-3">📤 Business Summary Report (Share on WhatsApp)</h2>
+      <h2 class="text-base font-bold mb-3">📊 Business Summary Report</h2>
       <div class="flex flex-wrap gap-2 mb-3">
         ${periodButtons.map(p => `
           <button onclick="onSummaryPeriodChange('${p.id}')"
@@ -2715,42 +2715,42 @@ function renderReports() {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Revenue</div>
-          <div class="font-extrabold text-[#0A2540]">\${formatCurrency(summary.revenue)}</div>
+          <div class="font-extrabold text-[#0A2540]">${formatCurrency(summary.revenue)}</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Expenses</div>
-          <div class="font-extrabold text-red-600">\${formatCurrency(summary.expense)}</div>
+          <div class="font-extrabold text-red-600">${formatCurrency(summary.expense)}</div>
         </div>
         <div class="bg-[#0A2540] rounded-lg p-3 text-white col-span-2">
           <div class="text-[10px] text-blue-200 uppercase">Net Profit</div>
-          <div class="font-extrabold ${summary.netProfit < 0 ? 'text-red-400' : 'text-green-400'}">\${formatCurrency(summary.netProfit)}</div>
+          <div class="font-extrabold ${summary.netProfit < 0 ? 'text-red-400' : 'text-green-400'}">${formatCurrency(summary.netProfit)}</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Petrol Sold</div>
-          <div class="font-extrabold text-orange-600">\${formatNum(summary.petrolL)} L</div>
+          <div class="font-extrabold text-orange-600">${formatNum(summary.petrolL)} L</div>
         </div>
         <div class="bg-[#EEF1F5] rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Diesel Sold</div>
-          <div class="font-extrabold text-blue-700">\${formatNum(summary.dieselL)} L</div>
+          <div class="font-extrabold text-blue-700">${formatNum(summary.dieselL)} L</div>
         </div>
         <div class="bg-emerald-50 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Cash Received</div>
-          <div class="font-extrabold text-emerald-700">\${formatCurrency(summary.totalCash)}</div>
+          <div class="font-extrabold text-emerald-700">${formatCurrency(summary.totalCash)}</div>
         </div>
         <div class="bg-indigo-50 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">UPI Received</div>
-          <div class="font-extrabold text-indigo-700">\${formatCurrency(summary.totalUpi)}</div>
+          <div class="font-extrabold text-indigo-700">${formatCurrency(summary.totalUpi)}</div>
         </div>
       </div>
 
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div class="bg-white border border-orange-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Remaining Petrol Stock (as of now)</div>
-          <div class="font-extrabold text-orange-600">\${formatNum(summary.remainingPetrolStock)} L</div>
+          <div class="font-extrabold text-orange-600">${formatNum(summary.remainingPetrolStock)} L</div>
         </div>
         <div class="bg-white border border-blue-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Remaining Diesel Stock (as of now)</div>
-          <div class="font-extrabold text-blue-700">\${formatNum(summary.remainingDieselStock)} L</div>
+          <div class="font-extrabold text-blue-700">${formatNum(summary.remainingDieselStock)} L</div>
         </div>
       </div>
 
@@ -2758,23 +2758,21 @@ function renderReports() {
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div class="bg-white border border-red-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Total Udhari Given</div>
-          <div class="font-extrabold text-[#0A2540]">\${formatCurrency(summary.totalUdhari)}</div>
+          <div class="font-extrabold text-[#0A2540]">${formatCurrency(summary.totalUdhari)}</div>
         </div>
         <div class="bg-white border border-red-200 rounded-lg p-3">
           <div class="text-[10px] text-[#5A6B82] uppercase">Outstanding Udhari</div>
-          <div class="font-extrabold text-red-600">\${formatCurrency(summary.outstandingUdhari)}</div>
+          <div class="font-extrabold text-red-600">${formatCurrency(summary.outstandingUdhari)}</div>
         </div>
       </div>
 
       <!-- YAHAN PDF BUTTONS HAIN -->
-      <div class="flex flex-col sm:flex-row gap-3 mb-4">
-        <button onclick="generateSummaryPDF()" class="flex-1 bg-[#F5A623] text-[#0A2540] font-bold px-5 py-2.5 rounded-lg text-sm">📄 Download Business PDF</button>
-        <button onclick="generateExpensesPDF()" class="flex-1 bg-[#0A2540] text-white font-bold px-5 py-2.5 rounded-lg text-sm">📄 Download Expenses PDF</button>
+      <div class="flex flex-col sm:flex-row gap-3 mb-1">
+        <button onclick="generateSummaryPDF()" class="flex-1 bg-[#F5A623] hover:bg-yellow-500 text-[#0A2540] font-bold px-5 py-2.5 rounded-lg text-sm shadow transition-colors">📄 Download Business PDF</button>
+        <button onclick="generateExpensesPDF()" class="flex-1 bg-[#0A2540] hover:bg-blue-900 text-white font-bold px-5 py-2.5 rounded-lg text-sm shadow transition-colors">📄 Download Expenses PDF</button>
       </div>
-
-      <button onclick="shareReportToWhatsApp()" class="w-full sm:w-auto bg-green-600 text-white font-bold px-5 py-2.5 rounded-lg">📤 Share Report on WhatsApp</button>
     </div>
-  `;
+`;
 
   const dates = Object.keys(state.dailyRecords).filter(d => monthKey(d) === selectedReportMonth).sort();
   let sumPetrol = 0, sumDiesel = 0, sumRevenue = 0, sumExpense = 0, sumProfit = 0, sumVariance = 0;
