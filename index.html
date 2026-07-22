@@ -2577,6 +2577,12 @@ function generateCustomerStatementPDF(customerId) {
   }
 }
 
+// Indian Currency Format Helper Function
+function formatPdfCurrency(val) {
+  const num = parseFloat(val) || 0;
+  return 'Rs. ' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function generateSummaryPDF() {
   try {
     const range = getDateRangeForPeriod(selectedSummaryPeriod);
@@ -2585,8 +2591,8 @@ function generateSummaryPDF() {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageWidth = 210;
 
-    // --- Header Section ---
-    doc.setFillColor(10, 37, 64); // Dark Navy Blue
+    // --- Modern Header Section ---
+    doc.setFillColor(10, 37, 64);
     doc.rect(0, 0, pageWidth, 28, 'F');
 
     doc.setFont('helvetica', 'bold');
@@ -2596,7 +2602,7 @@ function generateSummaryPDF() {
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.setTextColor(245, 166, 35); // Gold Tint
+    doc.setTextColor(245, 166, 35);
     doc.text('Hindustan Petroleum Dealer • Executive Business Report', pageWidth / 2, 18, { align: 'center' });
 
     doc.setFontSize(8.5);
@@ -2605,56 +2611,54 @@ function generateSummaryPDF() {
 
     let y = 34;
 
-    // --- Modern Table Styling ---
     doc.autoTable({
       startY: y,
-      margin: { left: 14, right: 14 },
+      margin: { left: 12, right: 12 },
       head: [['Financial Metric / Particulars', 'Value / Quantity']],
       body: [
-        ['Total Sales Revenue', formatCurrency(s.revenue)],
-        ['Total Business Expenses', formatCurrency(s.expense)],
-        ['Net Profit / Earnings', formatCurrency(s.netProfit)],
+        ['Total Sales Revenue', formatPdfCurrency(s.revenue)],
+        ['Total Business Expenses', formatPdfCurrency(s.expense)],
+        ['Net Profit / Earnings', formatPdfCurrency(s.netProfit)],
         ['Petrol Fuel Sold', formatNum(s.petrolL) + ' Litres'],
         ['Diesel Fuel Sold', formatNum(s.dieselL) + ' Litres'],
-        ['Cash Collected', formatCurrency(s.totalCash)],
-        ['UPI / Digital Payments Received', formatCurrency(s.totalUpi)],
+        ['Cash Collected', formatPdfCurrency(s.totalCash)],
+        ['UPI / Digital Payments Received', formatPdfCurrency(s.totalUpi)],
         ['Remaining Petrol Stock (In Tank)', formatNum(s.remainingPetrolStock) + ' Litres'],
         ['Remaining Diesel Stock (In Tank)', formatNum(s.remainingDieselStock) + ' Litres'],
-        ['Total Udhari Given (All Time)', formatCurrency(s.totalUdhari)],
-        ['Outstanding Balance To Collect', formatCurrency(s.outstandingUdhari)]
+        ['Total Udhari Given (All Time)', formatPdfCurrency(s.totalUdhari)],
+        ['Outstanding Balance To Collect', formatPdfCurrency(s.outstandingUdhari)]
       ],
       theme: 'grid',
       headStyles: { 
         fillColor: [10, 37, 64], 
         textColor: [255, 255, 255], 
         fontStyle: 'bold', 
-        fontSize: 10,
+        fontSize: 10.5,
         cellPadding: 4 
       },
       bodyStyles: { 
-        fontSize: 9.5, 
+        fontSize: 10, 
         textColor: [30, 41, 59],
-        cellPadding: 3.5 
+        cellPadding: 4 
       },
       alternateRowStyles: { 
         fillColor: [248, 250, 252] 
       },
       columnStyles: {
-        0: { fontStyle: 'bold', cellWidth: 110 },
-        1: { halign: 'right', fontStyle: 'bold', cellWidth: 72 }
+        0: { fontStyle: 'bold' },
+        1: { halign: 'right', fontStyle: 'bold' }
       },
       didParseCell: function(data) {
         if (data.section === 'body') {
-          // Color Coding Particular Rows
-          if (data.row.index === 0) { // Revenue
-            data.cell.styles.textColor = [16, 185, 129]; // Emerald
-          } else if (data.row.index === 1) { // Expense
-            data.cell.styles.textColor = [220, 38, 38]; // Red
-          } else if (data.row.index === 2) { // Net Profit
+          if (data.row.index === 0) {
+            data.cell.styles.textColor = [16, 185, 129];
+          } else if (data.row.index === 1) {
+            data.cell.styles.textColor = [220, 38, 38];
+          } else if (data.row.index === 2) {
             data.cell.styles.fillColor = [240, 253, 244];
             data.cell.styles.textColor = [21, 128, 61]; 
-            data.cell.styles.fontSize = 10;
-          } else if (data.row.index === 10) { // Outstanding Udhari
+            data.cell.styles.fontSize = 10.5;
+          } else if (data.row.index === 10) {
             data.cell.styles.fillColor = [254, 242, 242];
             data.cell.styles.textColor = [220, 38, 38];
           }
@@ -2662,9 +2666,8 @@ function generateSummaryPDF() {
       }
     });
 
-    // Footer Stamp
     const finalY = doc.lastAutoTable.finalY + 12;
-    doc.setFontSize(8);
+    doc.setFontSize(8.5);
     doc.setTextColor(148, 163, 184);
     doc.setFont('helvetica', 'italic');
     doc.text('Generated automatically by SBS Filling Station OS • Confidential', pageWidth / 2, finalY, { align: 'center' });
@@ -2684,7 +2687,7 @@ function generateExpensesPDF() {
     const pageWidth = 210;
 
     // --- Red Header Section ---
-    doc.setFillColor(185, 28, 28); // Crimson Red Header
+    doc.setFillColor(185, 28, 28);
     doc.rect(0, 0, pageWidth, 28, 'F');
 
     doc.setFont('helvetica', 'bold');
@@ -2715,7 +2718,7 @@ function generateExpensesPDF() {
             expenseRows.push([
               formatDateDisplay(date),
               ex.description || 'General Expense',
-              formatCurrency(amt)
+              formatPdfCurrency(amt)
             ]);
           });
         }
@@ -2726,39 +2729,39 @@ function generateExpensesPDF() {
 
     doc.autoTable({
       startY: y,
-      margin: { left: 14, right: 14 },
+      margin: { left: 12, right: 12 },
       head: [['Date', 'Expense Particulars / Reason', 'Amount']],
       body: expenseRows.length ? expenseRows : [['-', 'No expenses recorded in this period', '-']],
-      foot: [['', 'TOTAL EXPENSES', formatCurrency(grandTotal)]],
+      foot: [['', 'TOTAL EXPENSES', formatPdfCurrency(grandTotal)]],
       theme: 'striped',
       headStyles: { 
         fillColor: [185, 28, 28], 
         textColor: [255, 255, 255], 
         fontStyle: 'bold', 
-        fontSize: 10,
-        cellPadding: 4
+        fontSize: 11,
+        cellPadding: 5
       },
       footStyles: { 
         fillColor: [30, 41, 59], 
         textColor: [255, 255, 255], 
         fontStyle: 'bold', 
-        fontSize: 10,
-        cellPadding: 4
+        fontSize: 11,
+        cellPadding: 5
       },
       bodyStyles: { 
-        fontSize: 9, 
+        fontSize: 10.5, 
         textColor: [30, 41, 59],
-        cellPadding: 3
+        cellPadding: 4.5
       },
       columnStyles: {
-        0: { cellWidth: 35, fontStyle: 'bold' },
-        1: { cellWidth: 110 },
-        2: { cellWidth: 37, halign: 'right', fontStyle: 'bold' }
+        0: { fontStyle: 'bold' },
+        1: { },
+        2: { halign: 'right', fontStyle: 'bold' }
       }
     });
 
     const finalY = doc.lastAutoTable.finalY + 12;
-    doc.setFontSize(8);
+    doc.setFontSize(8.5);
     doc.setTextColor(148, 163, 184);
     doc.setFont('helvetica', 'italic');
     doc.text('Generated automatically by SBS Filling Station OS', pageWidth / 2, finalY, { align: 'center' });
@@ -2769,7 +2772,7 @@ function generateExpensesPDF() {
     alert('Expense PDF generate hone mein issue aaya: ' + err.message);
   }
 }
-
+  
 function generateMonthlyReportPDF() {
   try {
     const { perDateProfit } = runFIFOEngine();
