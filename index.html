@@ -233,13 +233,35 @@ try {
 } catch (e) {}
 const stateDocRef = db.collection('sbsFillingStation').doc('mainData');
 
+/* =========================================================
+   GLOBAL STATE & VARIABLES (INIT BEFORE RENDER)
+========================================================= */
+let isCrashHandled = false;
+let activeTab = 'dashboard';
+let activeShiftTab = 'morning';
+let selectedEntryDate = todayStr();
+let selectedDipDate = todayStr();
+let selectedReportMonth = monthKey(todayStr());
+let selectedSalaryMonth = monthKey(todayStr());
+let expandedCustomerId = null;
+let statementModalCustomerId = null;
+let statementModalStart = todayStr();
+let statementModalEnd = todayStr();
+let expandedEmployeeId = null;
+let selectedSummaryPeriod = 'month';
+let customSummaryStart = todayStr();
+let customSummaryEnd = todayStr();
+
+// Cloud & Sync Control Variables (No Duplicates)
 let pendingFieldUpdates = {};
 let cloudSyncTimer = null;
 let suppressRenderUntil = 0;
 let isFirstSnapshot = true;
 let syncStatus = 'connecting';
 let docExistsOnServer = false;
-
+let syncWatchdogTimer = null;
+let syncFallbackTimer = null;
+  
 /* Every input handler calls this with the EXACT dot-path that changed,
    e.g. queueFieldSync('dailyRecords.2026-07-15.morning.rates.petrol', 97.5)
    This ensures only the specific changed field is written to the cloud,
@@ -248,8 +270,7 @@ let docExistsOnServer = false;
 /* =========================================================
    FIELD SYNC & REALTIME STATUS FIX
 ========================================================= */
-let syncWatchdogTimer = null;
-let syncFallbackTimer = null;
+
 
 function queueFieldSync(path, value) {
   pendingFieldUpdates[path] = value;
@@ -1317,14 +1338,37 @@ function render() {
     showCrashScreen(err);
   }
 }
+/* =========================================================
+   CRASH SAFETY NET & RECOVERY (WITH HOISTING GUARD)
+========================================================= */
+function forceHidePreloader() {
+  try {
+    const loaders = document.querySelectorAll('#preloader, .loader, .spinner, [id*="loading"], [class*="loader"]');
+    loaders.forEach(el => {
+      el.style.display = 'none';
+      el.style.opacity = '0';
+      el.style.visibility = 'hidden';
+    });
+  } catch (e) {}
+}
 
 function showCrashScreen(err) {
+  // 🛡️ HOISTING GUARD: Prevents 'Cannot access before initialization' error
+  if (typeof isCrashHandled !== 'undefined' && isCrashHandled) return;
+  if (typeof isCrashHandled !== 'undefined') isCrashHandled = true;
+
+  forceHidePreloader();
+  console.error('CRASH INTERCEPTED BY SAFETY NET:', err);
+
   let app;
   try {
     app = document.getElementById('app');
   } catch (e) { return; }
+  
   if (!app) return;
-  const message = (err && err.message) ? err.message : 'Unknown error';
+
+  const message = (err && (err.message || err.toString())) ? (err.message || err.toString()) : 'Unknown System Error';
+
   app.innerHTML = `
   <div class="min-h-screen flex items-center justify-center p-6 bg-[#EEF1F5]">
     <div class="bg-white rounded-2xl card-shadow p-8 max-w-md w-full text-center">
@@ -1335,14 +1379,16 @@ function showCrashScreen(err) {
       <p class="text-sm text-[#5A6B82] mb-1">Aapka data safe hai — ye sirf ek display error hai.</p>
       <p class="text-[11px] text-[#5A6B82] mb-5 break-words">${escapeHtml(message)}</p>
       <div class="flex flex-col gap-2">
-        <button onclick="location.reload()" class="bg-[#0A2540] text-white font-bold px-5 py-2.5 rounded-lg">🔄 Page Reload Karein</button>
-        <button onclick="recoverToDashboard()" class="bg-[#F5A623] text-[#0A2540] font-bold px-5 py-2.5 rounded-lg">🏠 Dashboard Pe Jaayein</button>
+        <button onclick="location.reload()" class="bg-[#0A2540] text-white font-bold px-5 py-2.5 rounded-lg hover:bg-slate-800 transition-all">🔄 Page Reload Karein</button>
+        <button onclick="recoverToDashboard()" class="bg-[#F5A623] text-[#0A2540] font-bold px-5 py-2.5 rounded-lg hover:bg-amber-500 transition-all">🏠 Dashboard Pe Jaayein</button>
       </div>
     </div>
   </div>`;
 }
+
 function recoverToDashboard() {
   try {
+    if (typeof isCrashHandled !== 'undefined') isCrashHandled = false; // Reset guard for fresh render
     activeTab = 'dashboard';
     render();
   } catch (e) {
