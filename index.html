@@ -2584,53 +2584,95 @@ function generateSummaryPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageWidth = 210;
-    let y = 15;
 
-    doc.setFillColor(10, 37, 64);
-    doc.rect(0, 0, pageWidth, 4, 'F');
+    // --- Header Section ---
+    doc.setFillColor(10, 37, 64); // Dark Navy Blue
+    doc.rect(0, 0, pageWidth, 28, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(10, 37, 64);
-    doc.text('SBS FILLING STATION', pageWidth / 2, y, { align: 'center' });
-    y += 6;
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(90, 107, 130);
-    doc.text('BUSINESS SUMMARY REPORT', pageWidth / 2, y, { align: 'center' });
-    y += 5;
-    doc.text('Period: ' + formatDateDisplay(range.start) + ' to ' + formatDateDisplay(range.end) + ' (' + s.daysInRange + ' Days)', pageWidth / 2, y, { align: 'center' });
-    y += 10;
+    doc.setFontSize(18);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SBS FILLING STATION', pageWidth / 2, 12, { align: 'center' });
 
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(245, 166, 35); // Gold Tint
+    doc.text('Hindustan Petroleum Dealer • Executive Business Report', pageWidth / 2, 18, { align: 'center' });
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`Period: ${formatDateDisplay(range.start)} to ${formatDateDisplay(range.end)} (${s.daysInRange} Days)`, pageWidth / 2, 23, { align: 'center' });
+
+    let y = 34;
+
+    // --- Modern Table Styling ---
     doc.autoTable({
       startY: y,
-      margin: { left: 15, right: 15 },
-      head: [['Particulars / Description', 'Amount / Quantity']],
+      margin: { left: 14, right: 14 },
+      head: [['Financial Metric / Particulars', 'Value / Quantity']],
       body: [
-        ['Total Revenue', formatCurrency(s.revenue)],
-        ['Total Expenses', formatCurrency(s.expense)],
-        ['Net Profit', formatCurrency(s.netProfit)],
-        ['Petrol Sold', formatNum(s.petrolL) + ' L'],
-        ['Diesel Sold', formatNum(s.dieselL) + ' L'],
-        ['Cash Received', formatCurrency(s.totalCash)],
-        ['UPI Received', formatCurrency(s.totalUpi)],
-        ['Remaining Petrol Stock', formatNum(s.remainingPetrolStock) + ' L'],
-        ['Remaining Diesel Stock', formatNum(s.remainingDieselStock) + ' L'],
+        ['Total Sales Revenue', formatCurrency(s.revenue)],
+        ['Total Business Expenses', formatCurrency(s.expense)],
+        ['Net Profit / Earnings', formatCurrency(s.netProfit)],
+        ['Petrol Fuel Sold', formatNum(s.petrolL) + ' Litres'],
+        ['Diesel Fuel Sold', formatNum(s.dieselL) + ' Litres'],
+        ['Cash Collected', formatCurrency(s.totalCash)],
+        ['UPI / Digital Payments Received', formatCurrency(s.totalUpi)],
+        ['Remaining Petrol Stock (In Tank)', formatNum(s.remainingPetrolStock) + ' Litres'],
+        ['Remaining Diesel Stock (In Tank)', formatNum(s.remainingDieselStock) + ' Litres'],
         ['Total Udhari Given (All Time)', formatCurrency(s.totalUdhari)],
-        ['Outstanding Udhari Balance', formatCurrency(s.outstandingUdhari)]
+        ['Outstanding Balance To Collect', formatCurrency(s.outstandingUdhari)]
       ],
       theme: 'grid',
-      headStyles: { fillColor: [10, 37, 64], textColor: 255, fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 10, textColor: [30, 41, 59] },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      styles: { cellPadding: 3.5 }
+      headStyles: { 
+        fillColor: [10, 37, 64], 
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold', 
+        fontSize: 10,
+        cellPadding: 4 
+      },
+      bodyStyles: { 
+        fontSize: 9.5, 
+        textColor: [30, 41, 59],
+        cellPadding: 3.5 
+      },
+      alternateRowStyles: { 
+        fillColor: [248, 250, 252] 
+      },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 110 },
+        1: { halign: 'right', fontStyle: 'bold', cellWidth: 72 }
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body') {
+          // Color Coding Particular Rows
+          if (data.row.index === 0) { // Revenue
+            data.cell.styles.textColor = [16, 185, 129]; // Emerald
+          } else if (data.row.index === 1) { // Expense
+            data.cell.styles.textColor = [220, 38, 38]; // Red
+          } else if (data.row.index === 2) { // Net Profit
+            data.cell.styles.fillColor = [240, 253, 244];
+            data.cell.styles.textColor = [21, 128, 61]; 
+            data.cell.styles.fontSize = 10;
+          } else if (data.row.index === 10) { // Outstanding Udhari
+            data.cell.styles.fillColor = [254, 242, 242];
+            data.cell.styles.textColor = [220, 38, 38];
+          }
+        }
+      }
     });
 
-    doc.save('Business_Summary_' + range.start + '_to_' + range.end + '.pdf');
+    // Footer Stamp
+    const finalY = doc.lastAutoTable.finalY + 12;
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Generated automatically by SBS Filling Station OS • Confidential', pageWidth / 2, finalY, { align: 'center' });
+
+    doc.save(`SBS_Business_Summary_${range.start}_to_${range.end}.pdf`);
   } catch (err) {
     console.error(err);
-    alert('PDF Generate hone mein error aaya: ' + err.message);
+    alert('Summary PDF generate hone mein issue aaya: ' + err.message);
   }
 }
 
@@ -2640,24 +2682,24 @@ function generateExpensesPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const pageWidth = 210;
-    let y = 15;
 
-    doc.setFillColor(220, 38, 38);
-    doc.rect(0, 0, pageWidth, 4, 'F');
+    // --- Red Header Section ---
+    doc.setFillColor(185, 28, 28); // Crimson Red Header
+    doc.rect(0, 0, pageWidth, 28, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(10, 37, 64);
-    doc.text('SBS FILLING STATION', pageWidth / 2, y, { align: 'center' });
-    y += 6;
+    doc.setFontSize(18);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SBS FILLING STATION', pageWidth / 2, 12, { align: 'center' });
 
-    doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(90, 107, 130);
-    doc.text('DAILY EXPENSES REPORT (DATE-WISE)', pageWidth / 2, y, { align: 'center' });
-    y += 5;
-    doc.text('Period: ' + formatDateDisplay(range.start) + ' to ' + formatDateDisplay(range.end), pageWidth / 2, y, { align: 'center' });
-    y += 10;
+    doc.setFontSize(9.5);
+    doc.setTextColor(254, 226, 226);
+    doc.text('DAILY EXPENSES & OUTFLOW REPORT', pageWidth / 2, 18, { align: 'center' });
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(254, 242, 242);
+    doc.text(`Period: ${formatDateDisplay(range.start)} to ${formatDateDisplay(range.end)}`, pageWidth / 2, 23, { align: 'center' });
 
     let expenseRows = [];
     let grandTotal = 0;
@@ -2672,7 +2714,7 @@ function generateExpensesPDF() {
             grandTotal += amt;
             expenseRows.push([
               formatDateDisplay(date),
-              ex.description || '-',
+              ex.description || 'General Expense',
               formatCurrency(amt)
             ]);
           });
@@ -2680,23 +2722,51 @@ function generateExpensesPDF() {
       }
     });
 
+    let y = 34;
+
     doc.autoTable({
       startY: y,
-      margin: { left: 15, right: 15 },
-      head: [['Date', 'Expense Description', 'Amount']],
+      margin: { left: 14, right: 14 },
+      head: [['Date', 'Expense Particulars / Reason', 'Amount']],
       body: expenseRows.length ? expenseRows : [['-', 'No expenses recorded in this period', '-']],
-      foot: [['', 'Total Expense', formatCurrency(grandTotal)]],
-      theme: 'grid',
-      headStyles: { fillColor: [220, 38, 38], textColor: 255, fontStyle: 'bold', fontSize: 10 },
-      footStyles: { fillColor: [238, 241, 245], textColor: [10, 37, 64], fontStyle: 'bold', fontSize: 10 },
-      bodyStyles: { fontSize: 9.5, textColor: [30, 41, 59] },
-      styles: { cellPadding: 3 }
+      foot: [['', 'TOTAL EXPENSES', formatCurrency(grandTotal)]],
+      theme: 'striped',
+      headStyles: { 
+        fillColor: [185, 28, 28], 
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold', 
+        fontSize: 10,
+        cellPadding: 4
+      },
+      footStyles: { 
+        fillColor: [30, 41, 59], 
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold', 
+        fontSize: 10,
+        cellPadding: 4
+      },
+      bodyStyles: { 
+        fontSize: 9, 
+        textColor: [30, 41, 59],
+        cellPadding: 3
+      },
+      columnStyles: {
+        0: { cellWidth: 35, fontStyle: 'bold' },
+        1: { cellWidth: 110 },
+        2: { cellWidth: 37, halign: 'right', fontStyle: 'bold' }
+      }
     });
 
-    doc.save('Expense_Report_' + range.start + '_to_' + range.end + '.pdf');
+    const finalY = doc.lastAutoTable.finalY + 12;
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Generated automatically by SBS Filling Station OS', pageWidth / 2, finalY, { align: 'center' });
+
+    doc.save(`Expense_Report_${range.start}_to_${range.end}.pdf`);
   } catch (err) {
     console.error(err);
-    alert('Expense PDF Generate hone mein error aaya: ' + err.message);
+    alert('Expense PDF generate hone mein issue aaya: ' + err.message);
   }
 }
 
