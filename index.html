@@ -2983,108 +2983,11 @@ function renderReports() {
   </div>`;
 }
 
-  const dates = Object.keys(state.dailyRecords).filter(d => monthKey(d) === selectedReportMonth).sort();
-  let sumPetrol = 0, sumDiesel = 0, sumRevenue = 0, sumExpense = 0, sumProfit = 0, sumVariance = 0;
-
-  const rows = dates.map(date => {
-    const totals = computeDayTotals(date);
-    const grossProfit = perDateProfit[date] || 0;
-    const expense = computeDayExpenseTotal(date);
-    const netProfit = grossProfit - expense;
-    const rec = state.dailyRecords[date];
-    let variance = 0;
-    if (rec && rec.dip) {
-      const petrolActual = (rec.dip.petrolDipCm !== null && rec.dip.petrolDipCm !== undefined) ? interpolateDip(PETROL_DIP_TABLE, parseFloat(rec.dip.petrolDipCm)) : null;
-      const dieselActual = (rec.dip.dieselDipMm !== null && rec.dip.dieselDipMm !== undefined) ? interpolateDip(DIESEL_DIP_TABLE, parseFloat(rec.dip.dieselDipMm)) : null;
-      if (petrolActual !== null) variance += petrolActual - getBookStock('petrol', date);
-      if (dieselActual !== null) variance += dieselActual - getBookStock('diesel', date);
-    }
-    sumPetrol += totals.petrolLiters;
-    sumDiesel += totals.dieselLiters;
-    sumRevenue += totals.expectedRevenue;
-    sumExpense += expense;
-    sumProfit += netProfit;
-    sumVariance += variance;
-    return `
-      <tr class="border-b border-[#EEF1F5]">
-        <td class="py-2 pr-2">${formatDateDisplay(date)}</td>
-        <td class="py-2 pr-2">${formatNum(totals.petrolLiters)}</td>
-        <td class="py-2 pr-2">${formatNum(totals.dieselLiters)}</td>
-        <td class="py-2 pr-2">${formatCurrency(totals.expectedRevenue)}</td>
-        <td class="py-2 pr-2 text-red-600">${formatCurrency(expense)}</td>
-        <td class="py-2 pr-2 font-semibold ${netProfit < 0 ? 'text-red-600' : 'text-green-700'}">${formatCurrency(netProfit)}</td>
-        <td class="py-2 pr-2 font-semibold ${variance < 0 ? 'text-red-600' : 'text-green-700'}">${formatNum(variance)} L</td>
-      </tr>`;
-  }).join('');
-
-  return `
-  <div class="space-y-4">
-    ${summarySection}
-    <div class="bg-white rounded-2xl card-shadow p-4 flex flex-wrap items-center justify-between gap-3 no-print">
-      <div>
-        <label class="text-xs font-semibold text-[#5A6B82]">Select Month</label>
-        <input type="month" value="${selectedReportMonth}" onchange="onReportMonthChange(this.value)"
-          class="block mt-1 border border-[#DCE3EC] rounded-lg px-3 py-2 font-semibold">
-      </div>
-      <button onclick="printReport()" class="bg-[#F5A623] text-[#0A2540] font-bold px-5 py-2.5 rounded-lg">🖨️ Print Report</button>
-    </div>
-
-    <div id="reportPrintArea" class="bg-white rounded-2xl card-shadow p-4 sm:p-5">
-      <div class="mb-3">
-        <h2 class="text-lg font-extrabold text-[#0A2540]">SBS Filling Station &mdash; Monthly Report</h2>
-        <p class="text-xs text-[#5A6B82]">Hindustan Petroleum Dealer &middot; Month: ${selectedReportMonth}</p>
-      </div>
-      <div class="overflow-x-auto -mx-2 px-2">
-        <table class="w-full text-sm min-w-[720px]">
-          <thead>
-            <tr class="text-left text-[#5A6B82] text-xs uppercase border-b border-[#DCE3EC]">
-              <th class="py-2 pr-2">Date</th>
-              <th class="py-2 pr-2">Petrol (L)</th>
-              <th class="py-2 pr-2">Diesel (L)</th>
-              <th class="py-2 pr-2">Total Revenue</th>
-              <th class="py-2 pr-2">Expenses</th>
-              <th class="py-2 pr-2">Net Profit</th>
-              <th class="py-2 pr-2">Tank Variance</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || `<tr><td colspan="7" class="py-4 text-center text-[#5A6B82]">No records found for this month.</td></tr>`}
-          </tbody>
-          <tfoot>
-            <tr class="border-t-2 border-[#0A2540] font-bold">
-              <td class="py-2">Total</td>
-              <td class="py-2">${formatNum(sumPetrol)}</td>
-              <td class="py-2">${formatNum(sumDiesel)}</td>
-              <td class="py-2">${formatCurrency(sumRevenue)}</td>
-              <td class="py-2">${formatCurrency(sumExpense)}</td>
-              <td class="py-2">${formatCurrency(sumProfit)}</td>
-              <td class="py-2">${formatNum(sumVariance)} L</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-
-    <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5 no-print">
-      <h2 class="text-base font-bold mb-1">Data & Backup</h2>
-      <p class="text-xs text-[#5A6B82] mb-3">Your data syncs live across all devices via cloud. As an extra safety net, you can download a full backup anytime, or restore from a previous backup file.</p>
-      <div class="flex flex-wrap gap-2">
-        <button onclick="downloadBackup()" class="bg-[#0A2540] text-white font-bold px-4 py-2.5 rounded-lg text-sm">⬇️ Download Backup (JSON)</button>
-        <label class="bg-white border border-[#DCE3EC] text-[#0A2540] font-bold px-4 py-2.5 rounded-lg text-sm cursor-pointer">
-          ⬆️ Restore from Backup
-          <input type="file" accept="application/json" class="hidden" onchange="restoreBackup(this.files[0])">
-        </label>
-      </div>
-    </div>
-  </div>`;
-}
 function onReportMonthChange(value) {
   selectedReportMonth = value;
   render();
 }
-function printReport() {
-  window.print();
-}
+
 function downloadBackup() {
   try {
     const payload = JSON.stringify(state, null, 2);
@@ -3101,6 +3004,7 @@ function downloadBackup() {
     alert('Backup download failed: ' + e.message);
   }
 }
+
 function restoreBackup(file) {
   if (!file) return;
   if (!confirm('This will REPLACE all current data (on every synced device) with the backup file. Are you sure?')) return;
@@ -3146,10 +3050,11 @@ function setupManifest() {
     ]
   };
   const link = document.getElementById('manifestLink');
-  link.setAttribute('href', 'data:application/json,' + encodeURIComponent(JSON.stringify(manifest)));
+  if (link) link.setAttribute('href', 'data:application/json,' + encodeURIComponent(JSON.stringify(manifest)));
   const favicon = document.getElementById('faviconLink');
   if (favicon) favicon.setAttribute('href', LOGO_DATA_URI);
 }
+
 function setupServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
@@ -3185,44 +3090,34 @@ function setupServiceWorker() {
 ========================================================= */
 window.addEventListener('error', function(event) {
   console.error('Uncaught global error caught by safety net:', event.error || event.message);
-  showCrashScreen(event.error || { message: event.message });
-});
-window.addEventListener('unhandledrejection', function(event) {
-  console.error('Unhandled promise rejection caught by safety net:', event.reason);
-  showCrashScreen(event.reason || { message: 'Unhandled promise rejection' });
+  if (typeof showCrashScreen === 'function') showCrashScreen(event.error || { message: event.message });
 });
 
-/* =========================================================
-   INIT
-========================================================= */
+window.addEventListener('unhandledrejection', function(event) {
+  console.error('Unhandled promise rejection caught by safety net:', event.reason);
+  if (typeof showCrashScreen === 'function') showCrashScreen(event.reason || { message: 'Unhandled promise rejection' });
+});
+
 /* =========================================================
    INIT (FAST & SAFE APP INITIALIZATION)
 ========================================================= */
-// 1. PWA Manifest & Service Worker Setup
 try { setupManifest(); } catch (e) { console.error('setupManifest error:', e); }
 try { setupServiceWorker(); } catch (e) { console.error('setupServiceWorker error:', e); }
 
-// 2. Turant App Render Karo (Isse Preloader Spinner hat jayega aur App khul jayegi)
+// Turant App Render Karo
 try {
-  render();
+  if (typeof render === 'function') render();
 } catch (e) {
   console.error('Initial render failed:', e);
-  showCrashScreen(e);
+  if (typeof showCrashScreen === 'function') showCrashScreen(e);
 }
 
-// 3. Background mein Firebase Sync Connect Karo
+// Background Cloud Listener Connect Karo
 try { 
-  attachCloudListener(); 
+  if (typeof attachCloudListener === 'function') attachCloudListener(); 
 } catch (e) { 
   console.error('attachCloudListener failed:', e); 
 }
-</script>
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js');
-    });
-  }
 </script>
 </body>
 </html>
