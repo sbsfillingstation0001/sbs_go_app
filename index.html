@@ -248,7 +248,7 @@ let docExistsOnServer = false;
 function queueFieldSync(path, value) {
   pendingFieldUpdates[path] = value;
   if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-  cloudSyncTimer = setTimeout(flushFieldSync, 120);
+  cloudSyncTimer = setTimeout(flushFieldSync, 200);
 }
 
 let syncWatchdogTimer = null;
@@ -357,43 +357,44 @@ function migrateLegacyCollections() {
 
 function attachCloudListener() {
   stateDocRef.onSnapshot(function(docSnap) {
-    if (docSnap.exists) {
-      docExistsOnServer = true;
-      const hasPending = docSnap.metadata.hasPendingWrites;
-      if (hasPending && !isFirstSnapshot) {
-        // This snapshot reflects our own write still in flight (Firestore's local
-        // optimistic cache echoing back). Our in-memory `state` is already at
-        // least this fresh (it may have even newer edits made in the meantime),
-        // so we deliberately do NOT overwrite it here - doing so was reverting
-        // just-made edits (like an expense just added) back to a slightly older
-        // version until the next unrelated re-render made it look "stuck".
-        syncStatus = 'syncing';
-        updateSyncStatusUI();
-        return;
-      }
-      const cloudData = docSnap.data();
-      state = Object.assign(defaultState(), cloudData);
-      migrateLegacyCollections();
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-      if (isFirstSnapshot) {
+    try {
+      if (docSnap.exists) {
+        docExistsOnServer = true;
+        const hasPending = docSnap.metadata.hasPendingWrites;
+        
+        if (hasPending && !isFirstSnapshot) {
+          syncStatus = 'syncing';
+          updateSyncStatusUI();
+          return;
+        }
+
+        const cloudData = docSnap.data();
+        state = Object.assign(defaultState(), cloudData);
+        migrateLegacyCollections();
+
+        try { 
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); 
+        } catch (e) {}
+
         isFirstSnapshot = false;
-        render();
-      }
-      syncStatus = hasPending ? 'syncing' : 'synced';
-      updateSyncStatusUI();
-      if (hasPending) return;
-      if (Date.now() < suppressRenderUntil) return;
-      safeRender();
-    } else {
-      docExistsOnServer = false;
-      if (isFirstSnapshot) {
+        syncStatus = 'synced';
+        updateSyncStatusUI();
+
+        if (Date.now() < suppressRenderUntil) return;
+        safeRender();
+      } else {
+        docExistsOnServer = false;
         isFirstSnapshot = false;
         fullMergePush();
-        render();
+        safeRender();
       }
+    } catch (err) {
+      console.error('Snapshot processing error:', err);
+      syncStatus = 'error';
+      updateSyncStatusUI();
     }
   }, function(err) {
-    console.error('Cloud listener error', err);
+    console.error('Cloud listener connection error:', err);
     syncStatus = 'offline';
     updateSyncStatusUI();
   });
@@ -3194,10 +3195,27 @@ window.addEventListener('unhandledrejection', function(event) {
 /* =========================================================
    INIT
 ========================================================= */
-try { setupManifest(); } catch (e) { console.error('setupManifest failed', e); }
-try { setupServiceWorker(); } catch (e) { console.error('setupServiceWorker failed', e); }
-render();
-try { attachCloudListener(); } catch (e) { console.error('attachCloudListener failed', e); showCrashScreen(e); }
+/* =========================================================
+   INIT (FAST & SAFE APP INITIALIZATION)
+========================================================= */
+// 1. PWA Manifest & Service Worker Setup
+try { setupManifest(); } catch (e) { console.error('setupManifest error:', e); }
+try { setupServiceWorker(); } catch (e) { console.error('setupServiceWorker error:', e); }
+
+// 2. Turant App Render Karo (Isse Preloader Spinner hat jayega aur App khul jayegi)
+try {
+  render();
+} catch (e) {
+  console.error('Initial render failed:', e);
+  showCrashScreen(e);
+}
+
+// 3. Background mein Firebase Sync Connect Karo
+try { 
+  attachCloudListener(); 
+} catch (e) { 
+  console.error('attachCloudListener failed:', e); 
+}
 </script>
 <script>
   if ('serviceWorker' in navigator) {
