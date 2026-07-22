@@ -510,21 +510,6 @@ function defaultState() {
 
 let state = loadState();
 migrateLegacyCollections();
-render();
-let activeTab = 'dashboard';
-let activeShiftTab = 'morning';
-let selectedEntryDate = todayStr();
-let selectedDipDate = todayStr();
-let selectedReportMonth = monthKey(todayStr());
-let selectedSalaryMonth = monthKey(todayStr());
-let expandedCustomerId = null;
-let statementModalCustomerId = null;
-let statementModalStart = todayStr();
-let statementModalEnd = todayStr();
-let expandedEmployeeId = null;
-let selectedSummaryPeriod = 'month';
-let customSummaryStart = todayStr();
-let customSummaryEnd = todayStr();
 
 function loadState() {
   try {
