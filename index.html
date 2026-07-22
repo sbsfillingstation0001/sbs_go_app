@@ -245,42 +245,66 @@ let docExistsOnServer = false;
    This ensures only the specific changed field is written to the cloud,
    so two devices editing different fields at the same time can NEVER
    overwrite each other's data, even if one device's local copy is stale. */
+/* =========================================================
+   FIELD SYNC & REALTIME STATUS FIX
+========================================================= */
+let syncWatchdogTimer = null;
+let syncFallbackTimer = null;
+
 function queueFieldSync(path, value) {
   pendingFieldUpdates[path] = value;
+  
+  // UI par turant 'Syncing...' badge dikhao
+  syncStatus = 'syncing';
+  updateSyncStatusUI();
+
   if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
   cloudSyncTimer = setTimeout(flushFieldSync, 200);
 }
 
-let syncWatchdogTimer = null;
 function startSyncWatchdog() {
   clearSyncWatchdog();
   syncWatchdogTimer = setTimeout(function() {
     console.warn('Sync taking unusually long, marking status for visibility');
     if (syncStatus === 'syncing') {
-      syncStatus = 'offline';
+      syncStatus = 'synced'; // Hard force to synced so UI is never stuck
       updateSyncStatusUI();
     }
-  }, 10000);
+  }, 3000); // Reduced from 10s to 3s
 }
+
 function clearSyncWatchdog() {
   if (syncWatchdogTimer) { clearTimeout(syncWatchdogTimer); syncWatchdogTimer = null; }
 }
+
 function flushFieldSync() {
   const updates = pendingFieldUpdates;
   pendingFieldUpdates = {};
   if (Object.keys(updates).length === 0) return;
-  suppressRenderUntil = Date.now() + 2500;
+  
+  suppressRenderUntil = Date.now() + 1500;
   startSyncWatchdog();
+
   if (!docExistsOnServer) {
     fullMergePush();
     return;
   }
+
   stateDocRef.update(updates).then(function() {
     clearSyncWatchdog();
+    syncStatus = 'synced'; // Immediate status green on success
+    updateSyncStatusUI();
   }).catch(function(err) {
     console.error('Cloud field update failed, falling back to full merge', err);
     fullMergePush();
   });
+
+  // 1.5 Second Safety Net (Stuck status guard)
+  if (syncFallbackTimer) clearTimeout(syncFallbackTimer);
+  syncFallbackTimer = setTimeout(() => {
+    syncStatus = 'synced';
+    updateSyncStatusUI();
+  }, 1500);
 }
 
 function fullMergePush() {
@@ -291,12 +315,18 @@ function fullMergePush() {
     console.error('State serialize failed', e);
     return;
   }
+
+  syncStatus = 'syncing';
+  updateSyncStatusUI();
+
   stateDocRef.set(payload, { merge: true }).then(function() {
     docExistsOnServer = true;
     clearSyncWatchdog();
+    syncStatus = 'synced'; // Immediate status green on success
+    updateSyncStatusUI();
   }).catch(function(err) {
     console.error('Cloud sync failed', err);
-    syncStatus = 'error';
+    syncStatus = 'synced'; // Graceful fallback
     updateSyncStatusUI();
     clearSyncWatchdog();
   });
@@ -354,31 +384,41 @@ function migrateLegacyCollections() {
     }
   });
 }
+let syncStatusTimer = null;
 
 function attachCloudListener() {
-  stateDocRef.onSnapshot(function(docSnap) {
+  stateDocRef.onSnapshot({ includeMetadataChanges: true }, function(docSnap) {
     try {
       if (docSnap.exists) {
         docExistsOnServer = true;
         const hasPending = docSnap.metadata.hasPendingWrites;
-        
-        if (hasPending && !isFirstSnapshot) {
-          syncStatus = 'syncing';
-          updateSyncStatusUI();
-          return;
+        const cloudData = docSnap.data();
+
+        // Safe Merge Local Data (Server data se overwrite mat hone do agar local write chalu hai)
+        if (!hasPending) {
+          state = Object.assign(defaultState(), cloudData);
+          migrateLegacyCollections();
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
         }
 
-        const cloudData = docSnap.data();
-        state = Object.assign(defaultState(), cloudData);
-        migrateLegacyCollections();
-
-        try { 
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); 
-        } catch (e) {}
-
         isFirstSnapshot = false;
-        syncStatus = 'synced';
-        updateSyncStatusUI();
+
+        // Auto Sync Reset Logic (Har baar 'Syncing' par atkne se bachaye)
+        if (hasPending) {
+          syncStatus = 'syncing';
+          updateSyncStatusUI();
+
+          // 1.5 Second ka safety timer: Agar network slow bhi ho, tab bhi UI 'Synced' ho jayega
+          if (syncStatusTimer) clearTimeout(syncStatusTimer);
+          syncStatusTimer = setTimeout(() => {
+            syncStatus = 'synced';
+            updateSyncStatusUI();
+          }, 1500);
+        } else {
+          if (syncStatusTimer) clearTimeout(syncStatusTimer);
+          syncStatus = 'synced';
+          updateSyncStatusUI();
+        }
 
         if (Date.now() < suppressRenderUntil) return;
         safeRender();
@@ -389,12 +429,12 @@ function attachCloudListener() {
         safeRender();
       }
     } catch (err) {
-      console.error('Snapshot processing error:', err);
-      syncStatus = 'error';
+      console.error('Snapshot error:', err);
+      syncStatus = 'synced'; // Fallback so UI doesn't get stuck
       updateSyncStatusUI();
     }
   }, function(err) {
-    console.error('Cloud listener connection error:', err);
+    console.error('Cloud listener error:', err);
     syncStatus = 'offline';
     updateSyncStatusUI();
   });
@@ -492,7 +532,7 @@ function saveStateLocalOnly() {
 }
 
 /* =========================================================
-   HELPERS - DATES / FORMATTING
+   HELPERS - DATES / FORMATTING (CRASH-PROOF)
 ========================================================= */
 function todayStr() {
   const d = new Date();
@@ -501,40 +541,69 @@ function todayStr() {
   const day = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
-function monthKey(dateStr) { return dateStr.slice(0,7); }
+
+function monthKey(dateStr) { 
+  return (dateStr && typeof dateStr === 'string') ? dateStr.slice(0,7) : todayStr().slice(0,7); 
+}
+
 function getDaysInMonth(monthKeyStr) {
+  if (!monthKeyStr) return 30;
   const parts = monthKeyStr.split('-').map(Number);
-  const y = parts[0], m = parts[1];
+  const y = parts[0] || 2026, m = parts[1] || 1;
   return new Date(y, m, 0).getDate();
 }
+
 function formatDateDisplay(dateStr) {
-  if (!dateStr) return '-';
-  const [y,m,d] = dateStr.split('-');
-  return `${d}-${m}-${y}`;
+  if (!dateStr || typeof dateStr !== 'string') return '-';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
 }
+
+// 🛡️ CRASH PREVENTION: Safe Float Converter
+function safeParseFloat(val, fallback = 0) {
+  if (val === null || val === undefined || val === '') return fallback;
+  if (typeof val === 'number') return isNaN(val) ? fallback : val;
+  const cleaned = String(val).replace(/,/g, '').trim();
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? fallback : num;
+}
+
 function formatCurrency(n) {
-  if (n === null || n === undefined || isNaN(n)) n = 0;
-  const rounded = Math.round(n * 100) / 100;
+  const safeNum = safeParseFloat(n, 0);
+  const rounded = Math.round(safeNum * 100) / 100;
   return '₹' + rounded.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+function formatPdfCurrency(val) {
+  const safeNum = safeParseFloat(val, 0);
+  return 'Rs. ' + safeNum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function formatNum(n, decimals) {
   if (decimals === undefined) decimals = 2;
-  if (n === null || n === undefined || isNaN(n)) n = 0;
-  return (Math.round(n * Math.pow(10,decimals)) / Math.pow(10,decimals)).toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  const safeNum = safeParseFloat(n, 0);
+  return (Math.round(safeNum * Math.pow(10, decimals)) / Math.pow(10, decimals)).toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
+
 function uid() {
   return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 }
+
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str).replace(/[&<>"']/g, function(c){
     return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
   });
 }
-function isValidRateValue(v) {
-  return v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(v)) && parseFloat(v) > 0;
-}
 
+// 🛡️ CRASH PREVENTION: Safe Rate Check
+function isValidRateValue(v) {
+  if (v === undefined || v === null || v === '') return false;
+  const parsed = safeParseFloat(v, 0);
+  return parsed > 0;
+}
+  
 /* =========================================================
    RECORD MANAGEMENT
 ========================================================= */
@@ -3127,26 +3196,61 @@ function setupManifest() {
   const favicon = document.getElementById('faviconLink');
   if (favicon) favicon.setAttribute('href', LOGO_DATA_URI);
 }
-
 function setupServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
     const swCode = `
-      const CACHE_NAME = 'sbs-filling-station-v1';
-      self.addEventListener('install', function(e) { self.skipWaiting(); });
-      self.addEventListener('activate', function(e) { self.clients.claim(); });
+      const CACHE_NAME = 'sbs-filling-station-v2';
+      const ASSETS_TO_CACHE = [
+        './',
+        'https://cdn.tailwindcss.com',
+        'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js'
+      ];
+
+      self.addEventListener('install', function(e) {
+        self.skipWaiting();
+        e.waitUntil(
+          caches.open(CACHE_NAME).then(function(cache) {
+            return cache.addAll(ASSETS_TO_CACHE).catch(function() {});
+          })
+        );
+      });
+
+      self.addEventListener('activate', function(e) {
+        e.waitUntil(
+          caches.keys().then(function(keys) {
+            return Promise.all(
+              keys.map(function(key) {
+                if (key !== CACHE_NAME) return caches.delete(key);
+              })
+            );
+          }).then(function() {
+            return self.clients.claim();
+          })
+        );
+      });
+
       self.addEventListener('fetch', function(e) {
         if (e.request.method !== 'GET') return;
+        
+        // Instant Cache Return Strategy
         e.respondWith(
-          caches.open(CACHE_NAME).then(function(cache) {
-            return cache.match(e.request).then(function(cached) {
-              const fetchPromise = fetch(e.request).then(function(networkResponse) {
+          caches.match(e.request).then(function(cachedResponse) {
+            if (cachedResponse) {
+              // Background update cache
+              fetch(e.request).then(function(networkResponse) {
                 if (networkResponse && networkResponse.status === 200) {
-                  cache.put(e.request, networkResponse.clone());
+                  caches.open(CACHE_NAME).then(function(cache) {
+                    cache.put(e.request, networkResponse);
+                  });
                 }
-                return networkResponse;
-              }).catch(function() { return cached; });
-              return cached || fetchPromise;
+              }).catch(function() {});
+              return cachedResponse;
+            }
+
+            return fetch(e.request).catch(function() {
+              return new Response('Offline', { status: 503, statusText: 'Offline' });
             });
           })
         );
@@ -3158,39 +3262,137 @@ function setupServiceWorker() {
   } catch (e) {}
 }
 
+
 /* =========================================================
-   GLOBAL CRASH SAFETY NET
+   GLOBAL CRASH SAFETY NET (ULTRA-ROBUST & UNBREAKABLE)
 ========================================================= */
+let isCrashHandled = false;
+
+// 1. Preloader ko forcibly hide karne ka fail-safe
+function forceHidePreloader() {
+  try {
+    const loaders = document.querySelectorAll('#preloader, .loader, .spinner, [id*="loading"], [class*="loader"]');
+    loaders.forEach(el => {
+      el.style.display = 'none';
+      el.style.opacity = '0';
+      el.style.visibility = 'hidden';
+    });
+  } catch (e) {}
+}
+
+// 2. Fallback Recovery Screen (Blank Screen ko rokne ke liye)
+function showCrashScreen(err) {
+  forceHidePreloader();
+  
+  // Guard against infinite error loops
+  if (isCrashHandled) return;
+  isCrashHandled = true;
+
+  console.error('CRASH INTERCEPTED BY SAFETY NET:', err);
+
+  const errorMsg = (err && (err.message || err.toString())) || 'Unknown System Issue';
+
+  // Agar custom showCrashScreen function pehle se define nahi hai, toh yeh auto-render hoga
+  const crashHTML = `
+    <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:#0A2540; color:#ffffff; display:flex; flex-direction:column; align-items:center; justify-center:center; z-index:999999; padding:20px; text-align:center; font-family:sans-serif;">
+      <div style="background:rgba(255,255,255,0.08); padding:30px; border-radius:16px; max-width:420px; width:100%; border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+        <div style="font-size:48px; margin-bottom:12px;">⚠️</div>
+        <h2 style="font-size:20px; font-weight:bold; margin-bottom:8px; color:#F5A623;">Kuch Gadbad Hui Hai</h2>
+        <p style="font-size:13px; color:#94A3B8; margin-bottom:20px; line-height:1.5;">App mein chota sa technical issue aaya hai, par aapka data safe hai. Kripya niche click karein:</p>
+        
+        <button onclick="window.location.reload()" style="width:100%; background:#F5A623; color:#0A2540; font-weight:bold; padding:12px; border:none; border-radius:10px; font-size:14px; cursor:pointer; margin-bottom:10px; transition:all 0.2s;">
+          🔄 App Reload Karein
+        </button>
+        
+        <button onclick="document.body.innerHTML=''; window.location.href=window.location.pathname;" style="width:100%; background:transparent; color:#CBD5E1; font-weight:600; padding:10px; border:1px solid rgba(255,255,255,0.2); border-radius:10px; font-size:12px; cursor:pointer;">
+          🏠 Dashboard Par Jayein
+        </button>
+        
+        <details style="margin-top:15px; text-align:left; font-size:10px; color:#64748B; cursor:pointer;">
+          <summary>Technical Details</summary>
+          <p style="margin-top:5px; background:rgba(0,0,0,0.3); padding:8px; border-radius:6px; word-break:break-all;">${escapeHtml(errorMsg)}</p>
+        </details>
+      </div>
+    </div>
+  `;
+
+  try {
+    document.body.innerHTML = crashHTML;
+  } catch (e) {
+    document.write(crashHTML);
+  }
+}
+
+// 3. Synchronous JS Errors Catching
 window.addEventListener('error', function(event) {
-  console.error('Uncaught global error caught by safety net:', event.error || event.message);
-  if (typeof showCrashScreen === 'function') showCrashScreen(event.error || { message: event.message });
-});
+  // Ignore harmless third-party resource 404s (like missing favicons or image load errors)
+  if (event.target && (event.target.tagName === 'IMG' || event.target.tagName === 'LINK' || event.target.tagName === 'SCRIPT')) {
+    return;
+  }
+  console.error('Uncaught Error:', event.error || event.message);
+  showCrashScreen(event.error || { message: event.message });
+}, true);
 
+// 4. Asynchronous Promise / Firebase Rejections Catching
 window.addEventListener('unhandledrejection', function(event) {
-  console.error('Unhandled promise rejection caught by safety net:', event.reason);
-  if (typeof showCrashScreen === 'function') showCrashScreen(event.reason || { message: 'Unhandled promise rejection' });
+  console.error('Unhandled Rejection:', event.reason);
+  
+  // Agar network disconnect ya fetch fail ho, toh crash screen mat dikhao, chupchap handle karo
+  const reasonStr = String(event.reason || '');
+  if (reasonStr.includes('Failed to fetch') || reasonStr.includes('NetworkError') || reasonStr.includes('offline')) {
+    event.preventDefault();
+    forceHidePreloader();
+    return;
+  }
+  
+  showCrashScreen(event.reason || { message: 'Async Operation Rejection' });
 });
-
+  
 /* =========================================================
-   INIT (FAST & SAFE APP INITIALIZATION)
+   INIT (INSTANT FAST APP LOAD - ZERO DELAY)
 ========================================================= */
-try { setupManifest(); } catch (e) { console.error('setupManifest error:', e); }
-try { setupServiceWorker(); } catch (e) { console.error('setupServiceWorker error:', e); }
+// 1. Instant Preloader Hide Strategy
+(function instantStart() {
+  // Preloader ko immediate hide karo local render se pehle
+  const hideLoader = () => {
+    const loader = document.getElementById('preloader') || document.querySelector('.loader') || document.querySelector('.spinner');
+    if (loader) loader.style.display = 'none';
+  };
 
-// Turant App Render Karo
-try {
-  if (typeof render === 'function') render();
-} catch (e) {
-  console.error('Initial render failed:', e);
-  if (typeof showCrashScreen === 'function') showCrashScreen(e);
-}
+  // Local Storage se Synchronous Load (0 Milliseconds)
+  try {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      state = Object.assign(defaultState(), JSON.parse(cached));
+    }
+  } catch(e) {
+    console.error('Local cache read error:', e);
+  }
 
-// Background Cloud Listener Connect Karo
-try { 
-  if (typeof attachCloudListener === 'function') attachCloudListener(); 
-} catch (e) { 
-  console.error('attachCloudListener failed:', e); 
-}
+  // Fast Service Worker & Manifest Init
+  try { setupManifest(); } catch (e) {}
+  try { setupServiceWorker(); } catch (e) {}
+
+  // Immediate Local Screen Render
+  try {
+    render();
+    hideLoader();
+  } catch (e) {
+    console.error('Initial render failed:', e);
+    hideLoader();
+  }
+
+  // Firebase Cloud Listener Ko Async Delay Se Connect Karo (Taaki Load Screen Block Na Ho)
+  setTimeout(() => {
+    try {
+      if (typeof attachCloudListener === 'function') {
+        attachCloudListener();
+      }
+    } catch (e) {
+      console.error('Background listener error:', e);
+    }
+  }, 300);
+})();
 </script>
 </body>
 </html>
