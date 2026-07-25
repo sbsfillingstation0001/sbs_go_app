@@ -1454,9 +1454,15 @@ function renderFooter() {
 /* =========================================================
    RENDER: DASHBOARD
 ========================================================= */
+/* =========================================================
+   RENDER: DASHBOARD (FIXED MONTH & DATA FETCHING)
+========================================================= */
 function renderDashboard() {
-  // 1. Requirement Fix: Sabse latest entry wali date automatic pick karega
-  let today = todayStr();
+  // 1. Current Real Date (July 2026)
+  const actualToday = todayStr();
+  
+  // 2. Shift records me se latest date dhoondho
+  let today = actualToday;
   if (state.dailyRecords && typeof state.dailyRecords === 'object') {
     const datesWithEntries = Object.keys(state.dailyRecords).filter(d => {
       const r = state.dailyRecords[d];
@@ -1464,23 +1470,24 @@ function renderDashboard() {
     }).sort().reverse();
 
     if (datesWithEntries.length > 0) {
-      today = datesWithEntries[0]; // Sabse latest shift record wali date
+      today = datesWithEntries[0];
     }
   }
 
-  const isActuallyToday = today === todayStr();
-  const dayTotals = computeDayTotals ? computeDayTotals(today) : { totalLiters:0, petrolLiters:0, dieselLiters:0, expectedRevenue:0, netVariance:0, expenseTotal:0 };
+  const isActuallyToday = today === actualToday;
+  const dayTotals = (typeof computeDayTotals === 'function') ? computeDayTotals(today) : { totalLiters:0, petrolLiters:0, dieselLiters:0, expectedRevenue:0, netVariance:0, expenseTotal:0 };
   const todayExpense = dayTotals.expenseTotal || 0;
   
-  // Helper calculations for Monthly & Udhari metrics
-  const currentMonthKey = monthKey(today);
-  const monthlyRevenue = typeof getMonthlyRevenue === 'function' ? getMonthlyRevenue(currentMonthKey) : 0;
-  const monthlyGrossProfit = typeof getMonthlyProfit === 'function' ? getMonthlyProfit(currentMonthKey) : 0;
-  const monthlyExpenses = typeof getMonthlyExpenses === 'function' ? getMonthlyExpenses(currentMonthKey) : 0;
+  // 3. Fix Month Key (Calendar today ka month lo taaki future month pe jump na kare)
+  const currentMonthKey = monthKey(actualToday); // Strictly '2026-07'
+  
+  const monthlyRevenue = (typeof getMonthlyRevenue === 'function') ? getMonthlyRevenue(currentMonthKey) : 0;
+  const monthlyGrossProfit = (typeof getMonthlyProfit === 'function') ? getMonthlyProfit(currentMonthKey) : 0;
+  const monthlyExpenses = (typeof getMonthlyExpenses === 'function') ? getMonthlyExpenses(currentMonthKey) : 0;
   const monthlyNetProfit = monthlyGrossProfit - monthlyExpenses;
-  const monthlyUdhari = typeof getMonthlyUdhari === 'function' ? getMonthlyUdhari(currentMonthKey) : 0;
-  const totalUdhariGiven = typeof getTotalUdhariGivenAllTime === 'function' ? getTotalUdhariGivenAllTime() : 0;
-  const remainingUdhari = typeof getTotalOutstandingUdhari === 'function' ? getTotalOutstandingUdhari() : 0;
+  const monthlyUdhari = (typeof getMonthlyUdhari === 'function') ? getMonthlyUdhari(currentMonthKey) : 0;
+  const totalUdhariGiven = (typeof getTotalUdhariGivenAllTime === 'function') ? getTotalUdhariGivenAllTime() : 0;
+  const remainingUdhari = (typeof getTotalOutstandingUdhari === 'function') ? getTotalOutstandingUdhari() : 0;
   
   const varianceIsShort = dayTotals.netVariance < 0;
   const varianceLabel = varianceIsShort
@@ -1489,11 +1496,11 @@ function renderDashboard() {
   
   let monthLabel = currentMonthKey;
   try {
-    monthLabel = new Date(today + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    monthLabel = new Date(actualToday + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
   } catch (e) {}
 
-  // Stock Summary (All Time)
-  const stockSummary = typeof calcCurrentStockSummary === 'function' ? calcCurrentStockSummary() : null;
+  // Stock Summary
+  const stockSummary = (typeof calcCurrentStockSummary === 'function') ? calcCurrentStockSummary() : null;
 
   return `
   <div class="space-y-6">
@@ -1506,12 +1513,12 @@ function renderDashboard() {
           <div>
             <label class="text-[11px] font-semibold text-[#8592A6]">Petrol (₹/L)</label>
             <input id="petrolRateInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-bold text-[#0A2540] focus:border-[#F5A623]"
-              value="${state.settings.petrolRate || 106.50}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('petrol', this.value)">
+              value="${(state.settings && state.settings.petrolRate) || 102.30}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('petrol', this.value)">
           </div>
           <div>
             <label class="text-[11px] font-semibold text-[#8592A6]">Diesel (₹/L)</label>
             <input id="dieselRateInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-bold text-[#0A2540] focus:border-[#F5A623]"
-              value="${state.settings.dieselRate || 92.30}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('diesel', this.value)">
+              value="${(state.settings && state.settings.dieselRate) || 95.79}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('diesel', this.value)">
           </div>
         </div>
       </div>
