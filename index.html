@@ -890,35 +890,32 @@ function getBookStock(fuelType, uptoDate) {
   return initial + delivered - dispensed;
 }
 
+/* =========================================================
+   MASTER STOCK LINKING FIX (100% SYNC WITH TANK DIP)
+========================================================= */
 function getRemainingStock() {
-  let petrolDelivered = 0, dieselDelivered = 0;
-  if (state.deliveries && typeof state.deliveries === 'object') {
-    Object.values(state.deliveries).forEach(function(d) {
-      if (!d) return;
-      if (d.fuelType === 'petrol') petrolDelivered += (parseFloat(d.liters) || 0);
-      if (d.fuelType === 'diesel') dieselDelivered += (parseFloat(d.liters) || 0);
-    });
-  }
-
-  let petrolSold = 0, dieselSold = 0;
-  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
-    Object.keys(state.dailyRecords).forEach(function(date) {
-      if (typeof computeDayTotals === 'function') {
-        const t = computeDayTotals(date); // Ye exactly wahi value layega jo Reports me dikh rahi hai
-        if (t) {
-          petrolSold += (t.petrolLiters || 0);
-          dieselSold += (t.dieselLiters || 0);
-        }
-      }
-    });
-  }
-
-  const initialPetrol = parseFloat(state.settings && state.settings.initialPetrolStock) || 0;
-  const initialDiesel = parseFloat(state.settings && state.settings.initialDieselStock) || 0;
-
+  // Tank Dip wala engine ('getBookStock') ekdam perfect calculate kar raha hai (Initial + Delivery - Sold).
+  // '9999-12-31' date isliye di hai taaki aaj tak ka all-time data utha le.
+  
+  const pStock = (typeof getBookStock === 'function') ? getBookStock('petrol', '9999-12-31') : 0;
+  const dStock = (typeof getBookStock === 'function') ? getBookStock('diesel', '9999-12-31') : 0;
+  
   return {
-    petrol: (initialPetrol + petrolDelivered) - petrolSold,
-    diesel: (initialDiesel + dieselDelivered) - dieselSold
+    petrol: pStock,
+    diesel: dStock
+  };
+}
+
+// Ek safety check, agar dashboard me purana function call ho raha ho toh usko bhi sync kar diya
+function calcCurrentStockSummary() {
+  const pStock = (typeof getBookStock === 'function') ? getBookStock('petrol', '9999-12-31') : 0;
+  const dStock = (typeof getBookStock === 'function') ? getBookStock('diesel', '9999-12-31') : 0;
+  
+  return {
+    petrolRemaining: pStock,
+    dieselRemaining: dStock,
+    petrol: pStock, 
+    diesel: dStock
   };
 }
   
