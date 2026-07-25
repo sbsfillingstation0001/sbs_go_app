@@ -650,47 +650,33 @@ function getCarryForwardRate(fuelType, date, currentShiftName) {
   }
   return state.settings[fuelType + 'Rate'];
 }
-  
+
 function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
-  const rec = state.dailyRecords && state.dailyRecords[date];
-  
-  // 1. Same Day Check: Agar Evening shift hai toh Morning shift ka END reading check karo
+  const rec = state.dailyRecords[date];
   if (rec) {
     if (currentShiftName === 'evening' && rec.morning && rec.morning.nozzles && rec.morning.nozzles[nozzleId]) {
-      const morningEnd = rec.morning.nozzles[nozzleId].end;
-      if (morningEnd !== null && morningEnd !== undefined && morningEnd !== '') {
-        return safeParseFloat(morningEnd, null);
-      }
+      const end = rec.morning.nozzles[nozzleId].end;
+      if (end !== null && end !== undefined) return end;
+    }
+    if (currentShiftName === 'morning' && rec.evening && rec.evening.nozzles && rec.evening.nozzles[nozzleId]) {
+      const end = rec.evening.nozzles[nozzleId].end;
+      if (end !== null && end !== undefined) return end;
     }
   }
-
-  // 2. Prior Days Check: Pichle sabhi dino ki Sabse Latest END Reading dhoondho
-  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
-    const priorDates = Object.keys(state.dailyRecords)
-      .filter(function(d) { return d < date; })
-      .sort()
-      .reverse();
-
-    for (let i = 0; i < priorDates.length; i++) {
-      const r = state.dailyRecords[priorDates[i]];
-      if (!r) continue;
-      
-      // Evening shift pehle check karo, fir Morning shift
-      const shiftsInOrder = [r.evening, r.morning].filter(Boolean);
-      for (let j = 0; j < shiftsInOrder.length; j++) {
-        const shift = shiftsInOrder[j];
-        if (shift && shift.nozzles && shift.nozzles[nozzleId]) {
-          const prevEnd = shift.nozzles[nozzleId].end;
-          if (prevEnd !== null && prevEnd !== undefined && prevEnd !== '') {
-            return safeParseFloat(prevEnd, null);
-          }
-        }
+  const priorDates = Object.keys(state.dailyRecords).filter(function(d) { return d < date; }).sort().reverse();
+  for (let i = 0; i < priorDates.length; i++) {
+    const r = state.dailyRecords[priorDates[i]];
+    const shiftsInOrder = [r.evening, r.morning].filter(Boolean);
+    for (let j = 0; j < shiftsInOrder.length; j++) {
+      const shift = shiftsInOrder[j];
+      if (shift.nozzles && shift.nozzles[nozzleId]) {
+        const end = shift.nozzles[nozzleId].end;
+        if (end !== null && end !== undefined) return end;
       }
     }
   }
   return null;
 }
-
 function makeEmptyShift(date, shiftName) {
   const shift = {
     rates: {
@@ -1455,50 +1441,26 @@ function renderFooter() {
    RENDER: DASHBOARD
 ========================================================= */
 function renderDashboard() {
-  // 1. Requirement Fix: Sabse latest entry wali date automatic pick karega
-  let today = todayStr();
-  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
-    const datesWithEntries = Object.keys(state.dailyRecords).filter(d => {
-      const r = state.dailyRecords[d];
-      return r && (r.morning || r.evening);
-    }).sort().reverse();
-
-    if (datesWithEntries.length > 0) {
-      today = datesWithEntries[0]; // Sabse latest shift record wali date
-    }
-  }
-
+  const today = getLatestEntryDate();
   const isActuallyToday = today === todayStr();
-  const dayTotals = computeDayTotals ? computeDayTotals(today) : { totalLiters:0, petrolLiters:0, dieselLiters:0, expectedRevenue:0, netVariance:0, expenseTotal:0 };
-  const todayExpense = dayTotals.expenseTotal || 0;
-  
-  // Helper calculations for Monthly & Udhari metrics
-  const currentMonthKey = monthKey(today);
-  const monthlyRevenue = typeof getMonthlyRevenue === 'function' ? getMonthlyRevenue(currentMonthKey) : 0;
-  const monthlyGrossProfit = typeof getMonthlyProfit === 'function' ? getMonthlyProfit(currentMonthKey) : 0;
-  const monthlyExpenses = typeof getMonthlyExpenses === 'function' ? getMonthlyExpenses(currentMonthKey) : 0;
+  const dayTotals = computeDayTotals(today);
+  const todayExpense = dayTotals.expenseTotal;
+  const monthlyRevenue = getMonthlyRevenue(monthKey(today));
+  const monthlyGrossProfit = getMonthlyProfit(monthKey(today));
+  const monthlyExpenses = getMonthlyExpenses(monthKey(today));
   const monthlyNetProfit = monthlyGrossProfit - monthlyExpenses;
-  const monthlyUdhari = typeof getMonthlyUdhari === 'function' ? getMonthlyUdhari(currentMonthKey) : 0;
-  const totalUdhariGiven = typeof getTotalUdhariGivenAllTime === 'function' ? getTotalUdhariGivenAllTime() : 0;
-  const remainingUdhari = typeof getTotalOutstandingUdhari === 'function' ? getTotalOutstandingUdhari() : 0;
-  
+  const monthlyUdhari = getMonthlyUdhari(monthKey(today));
+  const totalUdhariGiven = getTotalUdhariGivenAllTime();
+  const remainingUdhari = getTotalOutstandingUdhari();
   const varianceIsShort = dayTotals.netVariance < 0;
   const varianceLabel = varianceIsShort
     ? `Shortage: ${formatCurrency(Math.abs(dayTotals.netVariance))}`
     : `Surplus/Balanced: ${formatCurrency(dayTotals.netVariance)}`;
-  
-  let monthLabel = currentMonthKey;
-  try {
-    monthLabel = new Date(today + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-  } catch (e) {}
-
-  // Stock Summary (All Time)
-  const stockSummary = typeof calcCurrentStockSummary === 'function' ? calcCurrentStockSummary() : null;
+  const monthLabel = new Date(today + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   return `
   <div class="space-y-6">
 
-    <!-- TODAY'S FUEL RATES -->
     <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
       <div class="flex-1">
         <h2 class="text-[11px] font-bold text-[#5A6B82] uppercase tracking-widest mb-2">Today's Fuel Rates</h2>
@@ -1506,23 +1468,20 @@ function renderDashboard() {
           <div>
             <label class="text-[11px] font-semibold text-[#8592A6]">Petrol (₹/L)</label>
             <input id="petrolRateInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-bold text-[#0A2540] focus:border-[#F5A623]"
-              value="${state.settings.petrolRate || 106.50}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('petrol', this.value)">
+              value="${state.settings.petrolRate}" oninput="onSettingsRateInput('petrol', this.value)">
           </div>
           <div>
             <label class="text-[11px] font-semibold text-[#8592A6]">Diesel (₹/L)</label>
             <input id="dieselRateInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-bold text-[#0A2540] focus:border-[#F5A623]"
-              value="${state.settings.dieselRate || 92.30}" oninput="if(typeof onSettingsRateInput==='function') onSettingsRateInput('diesel', this.value)">
+              value="${state.settings.dieselRate}" oninput="onSettingsRateInput('diesel', this.value)">
           </div>
         </div>
       </div>
     </div>
 
-    <!-- LATEST RECORD CARD -->
     <div class="rounded-2xl overflow-hidden shadow-lg" style="background: linear-gradient(135deg, #0A2540 0%, #123258 100%);">
       <div class="px-4 sm:px-6 pt-4 pb-1 flex items-center justify-between">
-        <span class="text-[11px] font-bold text-[#F5A623] uppercase tracking-widest">
-          ${isActuallyToday ? 'Today' : 'Latest Entry'} &middot; ${formatDateDisplay(today)}
-        </span>
+        <span class="text-[11px] font-bold text-[#F5A623] uppercase tracking-widest">${isActuallyToday ? 'Today' : 'Latest Entry'} &middot; ${formatDateDisplay(today)}</span>
         <span class="text-[10px] text-blue-200">Live</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/10 mt-2">
@@ -1534,7 +1493,7 @@ function renderDashboard() {
         <div class="bg-[#0A2540] px-4 sm:px-5 py-4">
           <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Expected Revenue</div>
           <div id="dashRevenueToday" class="text-xl sm:text-2xl font-extrabold text-white mt-1">${formatCurrency(dayTotals.expectedRevenue)}</div>
-          <div class="text-[10px] text-blue-300 mt-1">From shift sales</div>
+          <div class="text-[10px] text-blue-300 mt-1">From today's shifts</div>
         </div>
         <div class="bg-[#0A2540] px-4 sm:px-5 py-4">
           <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Cash Status</div>
@@ -1542,33 +1501,13 @@ function renderDashboard() {
           <div class="text-[10px] text-blue-300 mt-1">After expenses</div>
         </div>
         <div class="bg-[#0A2540] px-4 sm:px-5 py-4">
-          <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Expenses (${formatDateDisplay(today)})</div>
+          <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Today's Expenses</div>
           <div id="dashTodayExpense" class="text-xl sm:text-2xl font-extrabold text-rose-400 mt-1">${formatCurrency(todayExpense)}</div>
           <div class="text-[10px] text-blue-300 mt-1">Rent, misc, etc.</div>
         </div>
       </div>
     </div>
 
-    ${stockSummary ? `
-    <!-- REMAINING TANK STOCK (CALCULATED) -->
-    <div class="bg-white rounded-2xl p-5 card-shadow border border-slate-100">
-      <h3 class="text-xs font-bold text-[#5A6B82] uppercase tracking-wider mb-4">REMAINING TANK STOCK (CALCULATED)</h3>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div class="bg-emerald-50/60 border border-emerald-100 p-4 rounded-xl">
-          <div class="text-xs font-bold text-emerald-800">Petrol Remaining</div>
-          <div class="text-2xl font-extrabold text-emerald-900 mt-1">${formatNum(stockSummary.petrolRemaining, 2)} L</div>
-          <div class="text-[11px] text-emerald-700 mt-1">Initial: ${formatNum(stockSummary.initialPetrol, 0)}L + Delivered: ${formatNum(stockSummary.deliveredPetrol, 0)}L - Sold: ${formatNum(stockSummary.soldPetrol, 0)}L</div>
-        </div>
-        <div class="bg-blue-50/60 border border-blue-100 p-4 rounded-xl">
-          <div class="text-xs font-bold text-blue-800">Diesel Remaining</div>
-          <div class="text-2xl font-extrabold text-blue-900 mt-1">${formatNum(stockSummary.dieselRemaining, 2)} L</div>
-          <div class="text-[11px] text-blue-700 mt-1">Initial: ${formatNum(stockSummary.initialDiesel, 0)}L + Delivered: ${formatNum(stockSummary.deliveredDiesel, 0)}L - Sold: ${formatNum(stockSummary.soldDiesel, 0)}L</div>
-        </div>
-      </div>
-    </div>
-    ` : ''}
-
-    <!-- THIS MONTH OVERVIEW -->
     <div>
       <div class="flex items-center gap-3 mb-3">
         <span class="text-[11px] font-bold text-[#5A6B82] uppercase tracking-widest">This Month</span>
@@ -1584,7 +1523,7 @@ function renderDashboard() {
         <div class="bg-white rounded-2xl card-shadow p-4 border-t-[3px] border-rose-300">
           <div class="text-xs font-semibold text-[#5A6B82] uppercase">Monthly Expenses</div>
           <div id="dashMonthlyExpense" class="text-2xl font-extrabold text-rose-600 mt-1">${formatCurrency(monthlyExpenses)}</div>
-          <div class="text-[11px] text-[#5A6B82] mt-1">Total for ${currentMonthKey}</div>
+          <div class="text-[11px] text-[#5A6B82] mt-1">Total for ${monthKey(today)}</div>
         </div>
         <div class="bg-white rounded-2xl card-shadow p-4 border-t-[3px] border-emerald-400">
           <div class="text-xs font-semibold text-[#5A6B82] uppercase">Net Profit (After Expenses)</div>
@@ -1594,7 +1533,6 @@ function renderDashboard() {
       </div>
     </div>
 
-    <!-- UDHARI OVERVIEW -->
     <div>
       <div class="flex items-center gap-3 mb-3">
         <span class="text-[11px] font-bold text-[#5A6B82] uppercase tracking-widest">Udhari (Credit) Overview</span>
@@ -1605,7 +1543,7 @@ function renderDashboard() {
         <div class="bg-white rounded-2xl card-shadow p-4">
           <div class="text-xs font-semibold text-[#5A6B82] uppercase">Monthly Udhari Given</div>
           <div id="dashMonthlyUdhari" class="text-2xl font-extrabold text-orange-600 mt-1">${formatCurrency(monthlyUdhari)}</div>
-          <div class="text-[11px] text-[#5A6B82] mt-1">Shift-entry credit sales &middot; ${currentMonthKey}</div>
+          <div class="text-[11px] text-[#5A6B82] mt-1">Shift-entry credit sales &middot; ${monthKey(today)}</div>
         </div>
         <div class="bg-white rounded-2xl card-shadow p-4">
           <div class="text-xs font-semibold text-[#5A6B82] uppercase">Total Udhari Given</div>
@@ -1620,18 +1558,16 @@ function renderDashboard() {
       </div>
     </div>
 
-    <!-- QUICK ACTIONS -->
     <div class="rounded-2xl card-shadow p-4 sm:p-5 text-white" style="background: linear-gradient(135deg, #0A2540 0%, #16385f 100%);">
       <div class="text-[11px] font-bold text-blue-200 uppercase tracking-widest">Quick Actions</div>
       <div class="flex flex-wrap gap-2 mt-3">
-        <button onclick="switchTab('entry')" class="bg-[#F5A623] text-[#0A2540] font-bold text-sm px-4 py-2 rounded-lg hover:bg-amber-500 transition-all">Enter Shift Readings</button>
-        <button onclick="switchTab('deliveries')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg hover:bg-white/20 transition-all">Add Delivery</button>
-        <button onclick="switchTab('dip')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg hover:bg-white/20 transition-all">Record Tank Dip</button>
-        <button onclick="switchTab('salary')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg hover:bg-white/20 transition-all">Manage Salary</button>
-        <button onclick="switchTab('udhari')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg hover:bg-white/20 transition-all">Udhari Khata</button>
+        <button onclick="switchTab('entry')" class="bg-[#F5A623] text-[#0A2540] font-bold text-sm px-4 py-2 rounded-lg">Enter Shift Readings</button>
+        <button onclick="switchTab('deliveries')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg">Add Delivery</button>
+        <button onclick="switchTab('dip')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg">Record Tank Dip</button>
+        <button onclick="switchTab('salary')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg">Manage Salary</button>
+        <button onclick="switchTab('udhari')" class="bg-white/10 border border-white/30 text-white font-bold text-sm px-4 py-2 rounded-lg">Udhari Khata</button>
       </div>
     </div>
-
   </div>`;
 }
 
@@ -1681,8 +1617,9 @@ function updateDashboardComputedUI() {
     remainingUdhariEl.className = 'text-2xl font-extrabold mt-1 ' + (remainingUdhari > 0 ? 'text-red-600' : 'text-emerald-600');
   }
 }
+
 /* =========================================================
-   RENDER: SHIFT ENTRY (EXPENSES SORTED DESCENDING)
+   RENDER: SHIFT ENTRY
 ========================================================= */
 function renderEntry() {
   const date = selectedEntryDate;
@@ -1820,15 +1757,11 @@ function renderEntry() {
           <tbody>
             ${(function() {
               const rec = ensureRecord(date);
-              const list = Object.values(rec.expenses || {});
+              const list = Object.values(rec.expenses);
               if (!list.length) return `<tr><td colspan="3" class="py-3 text-center text-[#5A6B82]">No expenses added for this day yet.</td></tr>`;
-              
-              // 🔽 Expense Sorting: High Amount to Low Amount (Descending)
-              const sortedList = list.sort((a, b) => safeParseFloat(b.amount, 0) - safeParseFloat(a.amount, 0));
-
-              return sortedList.map(ex => `
+              return list.map(ex => `
                 <tr class="border-b border-[#EEF1F5]">
-                  <td class="py-2 pr-2">${escapeHtml(ex.description || ex.title || 'Expense')}</td>
+                  <td class="py-2 pr-2">${escapeHtml(ex.description)}</td>
                   <td class="py-2 pr-2 font-semibold">${formatCurrency(ex.amount)}</td>
                   <td class="py-2 pr-2"><button onclick="deleteExpense('${date}','${ex.id}')" class="text-red-600 font-bold text-xs">Delete</button></td>
                 </tr>`).join('');
@@ -1855,19 +1788,12 @@ function renderEntry() {
     </div>
   </div>`;
 }
-
 function submitExpenseForm(date) {
   const descEl = document.getElementById('expenseDescInput');
   const amtEl = document.getElementById('expenseAmountInput');
   const description = descEl ? descEl.value.trim() : '';
   const amount = amtEl ? amtEl.value : '';
-  if (!description || !amount || isNaN(parseFloat(amount))) {
-    alert('Please enter a valid description and amount.');
-    return;
-  }
   addExpense(date, description, amount);
-  if (descEl) descEl.value = '';
-  if (amtEl) amtEl.value = '';
 }
 
 function renderMachineGroups(date, shiftName, shift) {
@@ -1917,7 +1843,6 @@ function cashVarianceClass(shift) {
   const t = computeShiftTotals(shift);
   return t.variance < 0 ? 'text-red-600' : 'text-green-600';
 }
-
 function cashVarianceLabel(shift) {
   const t = computeShiftTotals(shift);
   return t.variance < 0 ? `Shortage: ${formatCurrency(Math.abs(t.variance))}` : `Surplus/Balanced: ${formatCurrency(t.variance)}`;
@@ -1927,12 +1852,10 @@ function onEntryDateChange(value) {
   selectedEntryDate = value;
   render();
 }
-
 function switchShiftTab(tab) {
   activeShiftTab = tab;
   render();
 }
-
 function syncEveningFromMorning(date) {
   const rec = ensureRecord(date);
   const evening = ensureShift(date, 'evening');
@@ -1958,7 +1881,6 @@ function onShiftRateInput(date, shiftName, fuelType, value) {
   queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.rates.' + fuelType, shift.rates[fuelType]);
   updateShiftComputedUI(date, shiftName);
 }
-
 function onNozzleInput(date, shiftName, nz, field, value) {
   const shift = ensureShift(date, shiftName);
   const v = value === '' ? null : parseFloat(value);
@@ -1967,7 +1889,6 @@ function onNozzleInput(date, shiftName, nz, field, value) {
   queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.nozzles.' + nz + '.' + field, shift.nozzles[nz][field]);
   updateShiftComputedUI(date, shiftName);
 }
-
 function onPaymentInput(date, shiftName, field, value) {
   const shift = ensureShift(date, shiftName);
   const v = value === '' ? null : parseFloat(value);
@@ -1976,7 +1897,6 @@ function onPaymentInput(date, shiftName, field, value) {
   queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.' + field, shift[field]);
   updateShiftComputedUI(date, shiftName);
 }
-
 function updateShiftComputedUI(date, shiftName) {
   if (activeTab !== 'entry' || activeShiftTab !== shiftName || selectedEntryDate !== date) return;
   const shift = ensureShift(date, shiftName);
@@ -2006,52 +1926,9 @@ function updateShiftComputedUI(date, shiftName) {
   }
 }
 
-
 /* =========================================================
-   RENDER: DELIVERIES (STOCK LOGIC FIXED)
+   RENDER: DELIVERIES
 ========================================================= */
-
-// 🛡️ ACCURATE & CRASH-PROOF STOCK CALCULATOR
-function getRemainingStock() {
-  const initialPetrol = safeParseFloat(state.settings && state.settings.initialPetrolStock, 0);
-  const initialDiesel = safeParseFloat(state.settings && state.settings.initialDieselStock, 0);
-
-  let deliveredPetrol = 0;
-  let deliveredDiesel = 0;
-
-  // 1. Deliveries se Invoiced Litres Add Karo
-  if (state.deliveries && typeof state.deliveries === 'object') {
-    Object.values(state.deliveries).forEach(del => {
-      if (!del) return;
-      const liters = safeParseFloat(del.liters, 0);
-      if (del.fuelType === 'petrol') deliveredPetrol += liters;
-      if (del.fuelType === 'diesel') deliveredDiesel += liters;
-    });
-  }
-
-  let soldPetrol = 0;
-  let soldDiesel = 0;
-
-  // 2. Daily Shifts se Sold Litres Subtract Karo
-  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
-    Object.values(state.dailyRecords).forEach(rec => {
-      if (!rec) return;
-      ['morning', 'evening'].forEach(shiftName => {
-        if (rec[shiftName] && typeof calcShiftTotals === 'function') {
-          const totals = calcShiftTotals(rec[shiftName]);
-          soldPetrol += safeParseFloat(totals.petrolLiters, 0);
-          soldDiesel += safeParseFloat(totals.dieselLiters, 0);
-        }
-      });
-    });
-  }
-
-  return {
-    petrol: (initialPetrol + deliveredPetrol) - soldPetrol,
-    diesel: (initialDiesel + deliveredDiesel) - soldDiesel
-  };
-}
-
 function computeDeliveryShortage(d) {
   if (d.dipBefore === undefined || d.dipBefore === null || d.dipBefore === '' ||
       d.dipAfter === undefined || d.dipAfter === null || d.dipAfter === '') {
@@ -2064,10 +1941,9 @@ function computeDeliveryShortage(d) {
   const shortage = (parseFloat(d.liters) || 0) - actualReceived;
   return { actualReceived: actualReceived, shortage: shortage };
 }
-
 function renderDeliveries() {
-  const { lotRemaining } = (typeof runFIFOEngine === 'function') ? runFIFOEngine() : { lotRemaining: {} };
-  const sorted = Object.values(state.deliveries || {}).sort((a,b) => b.date.localeCompare(a.date));
+  const { lotRemaining } = runFIFOEngine();
+  const sorted = Object.values(state.deliveries).sort((a,b) => b.date.localeCompare(a.date));
   const stock = getRemainingStock();
   return `
   <div class="space-y-4">
@@ -2091,12 +1967,12 @@ function renderDeliveries() {
         <div>
           <label class="text-xs font-semibold text-[#5A6B82]">Initial Petrol Stock (L)</label>
           <input id="initialPetrolStockInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-semibold"
-            value="${state.settings.initialPetrolStock || 0}" oninput="onInitialStockInput('petrol', this.value)">
+            value="${state.settings.initialPetrolStock}" oninput="onInitialStockInput('petrol', this.value)">
         </div>
         <div>
           <label class="text-xs font-semibold text-[#5A6B82]">Initial Diesel Stock (L)</label>
           <input id="initialDieselStockInput" type="number" step="0.01" class="num-input mt-1 w-full border border-[#DCE3EC] rounded-lg px-3 py-2 font-semibold"
-            value="${state.settings.initialDieselStock || 0}" oninput="onInitialStockInput('diesel', this.value)">
+            value="${state.settings.initialDieselStock}" oninput="onInitialStockInput('diesel', this.value)">
         </div>
       </div>
     </div>
@@ -2177,17 +2053,15 @@ function renderDeliveries() {
     </div>
   </div>`;
 }
-
 function onInitialStockInput(fuelType, value) {
   const v = parseFloat(value);
   const val = isNaN(v) ? 0 : v;
   if (fuelType === 'petrol') state.settings.initialPetrolStock = val;
   else state.settings.initialDieselStock = val;
-  if (typeof saveStateLocalOnly === 'function') saveStateLocalOnly();
-  if (typeof queueFieldSync === 'function') queueFieldSync('settings.initial' + (fuelType === 'petrol' ? 'Petrol' : 'Diesel') + 'Stock', val);
+  saveStateLocalOnly();
+  queueFieldSync('settings.initial' + (fuelType === 'petrol' ? 'Petrol' : 'Diesel') + 'Stock', val);
   updateRemainingStockUI();
 }
-
 function updateRemainingStockUI() {
   const stock = getRemainingStock();
   const petrolEl = document.getElementById('remainingPetrolStockDisplay');
@@ -2195,7 +2069,6 @@ function updateRemainingStockUI() {
   if (petrolEl) petrolEl.textContent = formatNum(stock.petrol) + ' L';
   if (dieselEl) dieselEl.textContent = formatNum(stock.diesel) + ' L';
 }
-
 function addDelivery() {
   const date = document.getElementById('deliveryDate').value;
   const fuelType = document.getElementById('deliveryFuelType').value;
@@ -2214,16 +2087,15 @@ function addDelivery() {
     dipAfter: dipAfterRaw === '' ? null : parseFloat(dipAfterRaw)
   };
   state.deliveries[id] = delivery;
-  if (typeof saveStateLocalOnly === 'function') saveStateLocalOnly();
-  if (typeof queueFieldSync === 'function') queueFieldSync('deliveries.' + id, delivery);
+  saveStateLocalOnly();
+  queueFieldSync('deliveries.' + id, delivery);
   render();
 }
-
 function deleteLot(id) {
   if (!confirm('Delete this delivery lot? This will affect FIFO profit and stock calculations.')) return;
   delete state.deliveries[id];
-  if (typeof saveStateLocalOnly === 'function') saveStateLocalOnly();
-  if (typeof queueFieldSync === 'function') queueFieldSync('deliveries.' + id, firebase.firestore.FieldValue.delete());
+  saveStateLocalOnly();
+  queueFieldSync('deliveries.' + id, firebase.firestore.FieldValue.delete());
   render();
 }
 
