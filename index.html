@@ -861,42 +861,54 @@ function runFIFOEngine() {
   [...petrolLots, ...dieselLots].forEach(lot => { lotRemaining[lot.id] = lot.remaining; });
   return { perDateProfit, lotRemaining };
 }
+/* =========================================================
+   ACCURATE STOCK CALCULATION (LINKED WITH REPORTS)
+========================================================= */
+
 function getBookStock(fuelType, uptoDate) {
   const initial = fuelType === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 0) : (parseFloat(state.settings.initialDieselStock) || 0);
-  const delivered = Object.values(state.deliveries || {})
-    .filter(d => d.fuelType === fuelType && d.date <= uptoDate)
-    .reduce((sum,d) => sum + (parseFloat(d.liters)||0), 0);
+  
+  let delivered = 0;
+  if (state.deliveries && typeof state.deliveries === 'object') {
+    delivered = Object.values(state.deliveries)
+      .filter(d => d && d.fuelType === fuelType && d.date <= uptoDate)
+      .reduce((sum, d) => sum + (parseFloat(d.liters) || 0), 0);
+  }
+
   let dispensed = 0;
-  Object.keys(state.dailyRecords || {}).forEach(date => {
-    if (date <= uptoDate) {
-      const t = computeDayTotals(date);
-      if (t) {
-        dispensed += (fuelType === 'petrol') ? (t.petrolLiters || 0) : (t.dieselLiters || 0);
+  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
+    Object.keys(state.dailyRecords).forEach(date => {
+      if (date <= uptoDate && typeof computeDayTotals === 'function') {
+        const t = computeDayTotals(date); // Direct report engine use kar rahe hain
+        if (t) {
+          dispensed += (fuelType === 'petrol') ? (t.petrolLiters || 0) : (t.dieselLiters || 0);
+        }
       }
-    }
-  });
+    });
+  }
+  
   return initial + delivered - dispensed;
 }
 
-// 🎯 ACCURATE REMAINING STOCK (Directly linked to Reports Data)
 function getRemainingStock() {
   let petrolDelivered = 0, dieselDelivered = 0;
   if (state.deliveries && typeof state.deliveries === 'object') {
     Object.values(state.deliveries).forEach(function(d) {
       if (!d) return;
       if (d.fuelType === 'petrol') petrolDelivered += (parseFloat(d.liters) || 0);
-      else if (d.fuelType === 'diesel') dieselDelivered += (parseFloat(d.liters) || 0);
+      if (d.fuelType === 'diesel') dieselDelivered += (parseFloat(d.liters) || 0);
     });
   }
 
   let petrolSold = 0, dieselSold = 0;
-  // Direct 'computeDayTotals' use kar rahe hain jo Reports tab ko power karta hai
   if (state.dailyRecords && typeof state.dailyRecords === 'object') {
     Object.keys(state.dailyRecords).forEach(function(date) {
-      const t = computeDayTotals(date);
-      if (t) {
-        petrolSold += (t.petrolLiters || 0);
-        dieselSold += (t.dieselLiters || 0);
+      if (typeof computeDayTotals === 'function') {
+        const t = computeDayTotals(date); // Ye exactly wahi value layega jo Reports me dikh rahi hai
+        if (t) {
+          petrolSold += (t.petrolLiters || 0);
+          dieselSold += (t.dieselLiters || 0);
+        }
       }
     });
   }
