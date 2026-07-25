@@ -653,10 +653,10 @@ function getCarryForwardRate(fuelType, date, currentShiftName) {
   
 function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
   const rec = state.dailyRecords && state.dailyRecords[date];
-  
+
   // 1. Same Day Check: Agar Evening shift hai toh Morning shift ka END reading check karo
-  if (rec) {
-    if (currentShiftName === 'evening' && rec.morning && rec.morning.nozzles && rec.morning.nozzles[nozzleId]) {
+  if (rec && currentShiftName === 'evening') {
+    if (rec.morning && rec.morning.nozzles && rec.morning.nozzles[nozzleId]) {
       const morningEnd = rec.morning.nozzles[nozzleId].end;
       if (morningEnd !== null && morningEnd !== undefined && morningEnd !== '') {
         return safeParseFloat(morningEnd, null);
@@ -674,7 +674,7 @@ function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
     for (let i = 0; i < priorDates.length; i++) {
       const r = state.dailyRecords[priorDates[i]];
       if (!r) continue;
-      
+
       // Evening shift pehle check karo, fir Morning shift
       const shiftsInOrder = [r.evening, r.morning].filter(Boolean);
       for (let j = 0; j < shiftsInOrder.length; j++) {
@@ -709,6 +709,7 @@ function makeEmptyShift(date, shiftName) {
   });
   return shift;
 }
+
 function ensureShift(date, shiftName) {
   const rec = ensureRecord(date);
   let isNewShift = false;
@@ -716,7 +717,7 @@ function ensureShift(date, shiftName) {
     rec[shiftName] = makeEmptyShift(date, shiftName);
     isNewShift = true;
   }
-  normalizeShift(rec[shiftName]);
+  normalizeShift(rec[shiftName], date, shiftName);
   if (isNewShift) {
     saveStateLocalOnly();
     queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.rates.petrol', rec[shiftName].rates.petrol);
@@ -729,11 +730,21 @@ function ensureShift(date, shiftName) {
   }
   return rec[shiftName];
 }
-function normalizeShift(shift) {
+
+function normalizeShift(shift, date, shiftName) {
   if (!shift.rates) shift.rates = { petrol: state.settings.petrolRate, diesel: state.settings.dieselRate };
   if (!shift.nozzles) shift.nozzles = {};
   NOZZLES.forEach(nz => {
-    if (!shift.nozzles[nz]) shift.nozzles[nz] = { start: null, end: null, test: null };
+    if (!shift.nozzles[nz]) {
+      shift.nozzles[nz] = { start: null, end: null, test: null };
+    }
+    // Fix: Agar nozzle ki start reading missing/null hai, toh pichhle end meter se auto-fill karo
+    if ((shift.nozzles[nz].start === null || shift.nozzles[nz].start === undefined) && date && shiftName) {
+      const lastEnd = getLastKnownMeterReading(nz, date, shiftName);
+      if (lastEnd !== null) {
+        shift.nozzles[nz].start = lastEnd;
+      }
+    }
     if (shift.nozzles[nz].test === undefined) shift.nozzles[nz].test = null;
   });
   if (shift.cashAmount === undefined) shift.cashAmount = (shift.cashCollected !== undefined ? shift.cashCollected : null);
@@ -972,7 +983,269 @@ function deleteExpense(date, expenseId) {
   queueFieldSync('dailyRecords.' + date + '.expenses.' + expenseId, firebase.firestore.FieldValue.delete());
   render();
 }
+/* =========================================================
+   CALCULATION ENGINE
+========================================================= */
+function computeNozzleRawLiters(nz) {
+  if (!nz) return 0;
+  const s = parseFloat(nz.start), e = parseFloat(nz.end);
+  if (isNaN(s) || isNaN(e) || e < s) return 0;
+  return e - s;
+}
 
+function computeNozzleTestLiters(nz) {
+  if (!nz) return 0;
+  const t = parseFloat(nz.test);
+  if (isNaN(t) || t < 0) return 0;
+  const raw = computeNozzleRawLiters(nz);
+  return Math.min(t, raw);
+}
+
+function computeNozzleSoldLiters(nz) {
+  return computeNozzleRawLiters(nz) - computeNozzleTestLiters(nz);
+}
+
+function computeShiftTotals(shift) {
+  let petrolSold = 0, dieselSold = 0, petrolDispensed = 0, dieselDispensed = 0, petrolTest = 0, dieselTest = 0;
+  const nozzles = (shift && shift.nozzles) ? shift.nozzles : {};
+  
+  if (typeof NOZZLES !== 'undefined') {
+    NOZZLES.forEach(nz => {
+      const raw = computeNozzleRawLiters(nozzles[nz]);
+      const test = computeNozzleTestLiters(nozzles[nz]);
+      const sold = raw - test;
+      if (typeof NOZZLE_FUEL !== 'undefined' && NOZZLE_FUEL[nz] === 'petrol') {
+        petrolDispensed += raw; petrolTest += test; petrolSold += sold;
+      } else {
+        dieselDispensed += raw; dieselTest += test; dieselSold += sold;
+      }
+    });
+  }
+
+  const rates = (shift && shift.rates) || { petrol: 0, diesel: 0 };
+  const expectedRevenue = petrolSold * (rates.petrol||0) + dieselSold * (rates.diesel||0);
+  const cashAmount = parseFloat(shift.cashAmount) || 0;
+  const upiAmount = parseFloat(shift.upiAmount) || 0;
+  const hpPayAmount = parseFloat(shift.hpPayAmount) || 0;
+  const udhariAmount = parseFloat(shift.udhariAmount) || 0;
+  const totalAccounted = cashAmount + upiAmount + hpPayAmount + udhariAmount;
+  const variance = totalAccounted - expectedRevenue;
+  return {
+    petrolLiters: petrolSold, dieselLiters: dieselSold, totalLiters: petrolSold + dieselSold,
+    petrolDispensed, dieselDispensed, totalDispensed: petrolDispensed + dieselDispensed,
+    petrolTest, dieselTest, totalTest: petrolTest + dieselTest,
+    expectedRevenue, cashAmount, upiAmount, hpPayAmount, udhariAmount, totalAccounted, variance
+  };
+}
+
+function computeDayTotals(date) {
+  const rec = state.dailyRecords[date];
+  const empty = { petrolLiters:0, dieselLiters:0, totalLiters:0, totalTest:0, expectedRevenue:0, cashAmount:0, upiAmount:0, hpPayAmount:0, udhariAmount:0, totalAccounted:0, variance:0, expenseTotal:0, netVariance:0, hasData:false };
+  if (!rec) return empty;
+  let out = { petrolLiters:0, dieselLiters:0, totalLiters:0, totalTest:0, expectedRevenue:0, cashAmount:0, upiAmount:0, hpPayAmount:0, udhariAmount:0, totalAccounted:0, variance:0, expenseTotal:0, netVariance:0, hasData:false };
+  ['morning','evening'].forEach(shiftName => {
+    const shift = rec[shiftName];
+    if (shift) {
+      out.hasData = true;
+      const t = computeShiftTotals(shift);
+      out.petrolLiters += t.petrolLiters;
+      out.dieselLiters += t.dieselLiters;
+      out.totalLiters += t.totalLiters;
+      out.totalTest += t.totalTest;
+      out.expectedRevenue += t.expectedRevenue;
+      out.cashAmount += t.cashAmount;
+      out.upiAmount += t.upiAmount;
+      out.hpPayAmount += t.hpPayAmount;
+      out.udhariAmount += t.udhariAmount;
+      out.totalAccounted += t.totalAccounted;
+    }
+  });
+  out.variance = out.totalAccounted - out.expectedRevenue;
+  out.expenseTotal = computeDayExpenseTotal(date);
+  out.netVariance = out.totalAccounted + out.expenseTotal - out.expectedRevenue;
+  return out;
+}
+
+function consumeFIFO(lots, dispensedLiters, soldLiters, rate) {
+  let remaining = dispensedLiters;
+  let cost = 0;
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    if (lot.remaining <= 0) continue;
+    const take = Math.min(lot.remaining, remaining);
+    cost += take * lot.cost;
+    lot.remaining -= take;
+    remaining -= take;
+  }
+  const revenue = soldLiters * rate;
+  return revenue - cost;
+}
+
+function runFIFOEngine() {
+  const deliveriesArr = Object.values(state.deliveries || {});
+  const dateSet = new Set([...Object.keys(state.dailyRecords || {}), ...deliveriesArr.map(d => d.date)]);
+  const sortedDates = Array.from(dateSet).sort();
+  const petrolLots = deliveriesArr.filter(d => d.fuelType === 'petrol')
+    .slice().sort((a,b) => a.date.localeCompare(b.date))
+    .map(d => ({ id: d.id, remaining: parseFloat(d.liters)||0, cost: parseFloat(d.costPerLiter)||0 }));
+  const dieselLots = deliveriesArr.filter(d => d.fuelType === 'diesel')
+    .slice().sort((a,b) => a.date.localeCompare(b.date))
+    .map(d => ({ id: d.id, remaining: parseFloat(d.liters)||0, cost: parseFloat(d.costPerLiter)||0 }));
+
+  const perDateProfit = {};
+  for (const date of sortedDates) {
+    let dayProfit = 0;
+    const rec = state.dailyRecords[date];
+    if (rec) {
+      ['morning','evening'].forEach(shiftName => {
+        const shift = rec[shiftName];
+        if (!shift) return;
+        const totals = computeShiftTotals(shift);
+        if (totals.petrolDispensed > 0) dayProfit += consumeFIFO(petrolLots, totals.petrolDispensed, totals.petrolLiters, (shift.rates && shift.rates.petrol) || 0);
+        if (totals.dieselDispensed > 0) dayProfit += consumeFIFO(dieselLots, totals.dieselDispensed, totals.dieselLiters, (shift.rates && shift.rates.diesel) || 0);
+      });
+    }
+    perDateProfit[date] = dayProfit;
+  }
+  const lotRemaining = {};
+  [...petrolLots, ...dieselLots].forEach(lot => { lotRemaining[lot.id] = lot.remaining; });
+  return { perDateProfit, lotRemaining };
+}
+
+function getBookStock(fuelType, uptoDate) {
+  const initial = fuelType === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 0) : (parseFloat(state.settings.initialDieselStock) || 0);
+  const delivered = Object.values(state.deliveries || {})
+    .filter(d => d.fuelType === fuelType && d.date <= uptoDate)
+    .reduce((sum,d) => sum + (parseFloat(d.liters)||0), 0);
+  let dispensed = 0;
+  Object.keys(state.dailyRecords || {}).forEach(date => {
+    if (date <= uptoDate) {
+      const rec = state.dailyRecords[date];
+      if (rec) {
+        ['morning','evening'].forEach(shiftName => {
+          const shift = rec[shiftName];
+          if (shift) {
+            const t = computeShiftTotals(shift);
+            dispensed += (fuelType === 'petrol') ? (t.petrolDispensed || 0) : (t.dieselDispensed || 0);
+          }
+        });
+      }
+    }
+  });
+  return initial + delivered - dispensed;
+}
+
+// 🎯 ACCURATE REMAINING STOCK FIX
+function getRemainingStock() {
+  let petrolDelivered = 0, dieselDelivered = 0;
+  if (state.deliveries && typeof state.deliveries === 'object') {
+    Object.values(state.deliveries).forEach(function(d) {
+      if (!d) return;
+      if (d.fuelType === 'petrol') petrolDelivered += (parseFloat(d.liters) || 0);
+      else if (d.fuelType === 'diesel') dieselDelivered += (parseFloat(d.liters) || 0);
+    });
+  }
+
+  let petrolDispensed = 0, dieselDispensed = 0;
+  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
+    Object.keys(state.dailyRecords).forEach(function(date) {
+      const rec = state.dailyRecords[date];
+      if (!rec) return;
+      ['morning', 'evening'].forEach(function(shiftName) {
+        const shift = rec[shiftName];
+        if (shift) {
+          const t = computeShiftTotals(shift);
+          petrolDispensed += (parseFloat(t.petrolDispensed) || 0);
+          dieselDispensed += (parseFloat(t.dieselDispensed) || 0);
+        }
+      });
+    });
+  }
+
+  const initialPetrol = parseFloat(state.settings && state.settings.initialPetrolStock) || 0;
+  const initialDiesel = parseFloat(state.settings && state.settings.initialDieselStock) || 0;
+
+  return {
+    petrol: (initialPetrol + petrolDelivered) - petrolDispensed,
+    diesel: (initialDiesel + dieselDelivered) - dieselDispensed
+  };
+}
+
+function interpolateDip(table, x) {
+  if (x === null || x === undefined || isNaN(x)) return 0;
+  if (x <= table[0][0]) return table[0][1];
+  if (x >= table[table.length-1][0]) return table[table.length-1][1];
+  for (let i = 0; i < table.length - 1; i++) {
+    const [x0,y0] = table[i], [x1,y1] = table[i+1];
+    if (x >= x0 && x <= x1) {
+      return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+    }
+  }
+  return table[table.length-1][1];
+}
+
+function getMonthlyProfit(monthKeyStr) {
+  const { perDateProfit } = runFIFOEngine();
+  let total = 0;
+  Object.keys(perDateProfit).forEach(date => {
+    if (monthKey(date) === monthKeyStr) total += perDateProfit[date];
+  });
+  return total;
+}
+
+function getMonthlyExpenses(monthKeyStr) {
+  let total = 0;
+  Object.keys(state.dailyRecords || {}).forEach(date => {
+    if (monthKey(date) === monthKeyStr) {
+      total += computeDayExpenseTotal(date);
+    }
+  });
+  return total;
+}
+
+function getMonthlyNetProfit(monthKeyStr) {
+  return getMonthlyProfit(monthKeyStr) - getMonthlyExpenses(monthKeyStr);
+}
+
+function getMonthlyUdhari(monthKeyStr) {
+  let total = 0;
+  Object.keys(state.dailyRecords || {}).forEach(date => {
+    if (monthKey(date) === monthKeyStr) {
+      total += computeDayTotals(date).udhariAmount;
+    }
+  });
+  return total;
+}
+
+function computeDayExpenseTotal(date) {
+  const rec = state.dailyRecords && state.dailyRecords[date];
+  if (!rec || !rec.expenses) return 0;
+  return Object.values(rec.expenses).reduce((sum, ex) => sum + (parseFloat(ex.amount) || 0), 0);
+}
+
+function addExpense(date, description, amount) {
+  const amt = parseFloat(amount);
+  if (!description || isNaN(amt) || amt <= 0) {
+    alert('Please enter a valid expense description and amount.');
+    return;
+  }
+  const rec = ensureRecord(date);
+  const id = uid();
+  rec.expenses[id] = { id: id, description: description, amount: amt };
+  saveStateLocalOnly();
+  queueFieldSync('dailyRecords.' + date + '.expenses.' + id, rec.expenses[id]);
+  render();
+}
+
+function deleteExpense(date, expenseId) {
+  const rec = ensureRecord(date);
+  if (rec && rec.expenses) {
+    delete rec.expenses[expenseId];
+  }
+  saveStateLocalOnly();
+  queueFieldSync('dailyRecords.' + date + '.expenses.' + expenseId, firebase.firestore.FieldValue.delete());
+  render();
+}
 /* =========================================================
    EMPLOYEES / SALARY
 ========================================================= */
