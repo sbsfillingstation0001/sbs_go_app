@@ -863,49 +863,53 @@ function runFIFOEngine() {
 }
 function getBookStock(fuelType, uptoDate) {
   const initial = fuelType === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 0) : (parseFloat(state.settings.initialDieselStock) || 0);
-  const delivered = Object.values(state.deliveries)
+  const delivered = Object.values(state.deliveries || {})
     .filter(d => d.fuelType === fuelType && d.date <= uptoDate)
     .reduce((sum,d) => sum + (parseFloat(d.liters)||0), 0);
   let dispensed = 0;
-  Object.keys(state.dailyRecords).forEach(date => {
+  Object.keys(state.dailyRecords || {}).forEach(date => {
     if (date <= uptoDate) {
-      const rec = state.dailyRecords[date];
-      ['morning','evening'].forEach(shiftName => {
-        const shift = rec[shiftName];
-        if (shift) {
-          const t = computeShiftTotals(shift);
-          dispensed += (fuelType === 'petrol') ? t.petrolDispensed : t.dieselDispensed;
-        }
-      });
+      const t = computeDayTotals(date);
+      if (t) {
+        dispensed += (fuelType === 'petrol') ? (t.petrolLiters || 0) : (t.dieselLiters || 0);
+      }
     }
   });
   return initial + delivered - dispensed;
 }
+
+// 🎯 ACCURATE REMAINING STOCK (Directly linked to Reports Data)
 function getRemainingStock() {
   let petrolDelivered = 0, dieselDelivered = 0;
-  Object.values(state.deliveries).forEach(function(d) {
-    if (d.fuelType === 'petrol') petrolDelivered += (parseFloat(d.liters) || 0);
-    else dieselDelivered += (parseFloat(d.liters) || 0);
-  });
-  let petrolDispensed = 0, dieselDispensed = 0;
-  Object.keys(state.dailyRecords).forEach(function(date) {
-    const rec = state.dailyRecords[date];
-    ['morning', 'evening'].forEach(function(shiftName) {
-      const shift = rec[shiftName];
-      if (shift) {
-        const t = computeShiftTotals(shift);
-        petrolDispensed += t.petrolDispensed;
-        dieselDispensed += t.dieselDispensed;
+  if (state.deliveries && typeof state.deliveries === 'object') {
+    Object.values(state.deliveries).forEach(function(d) {
+      if (!d) return;
+      if (d.fuelType === 'petrol') petrolDelivered += (parseFloat(d.liters) || 0);
+      else if (d.fuelType === 'diesel') dieselDelivered += (parseFloat(d.liters) || 0);
+    });
+  }
+
+  let petrolSold = 0, dieselSold = 0;
+  // Direct 'computeDayTotals' use kar rahe hain jo Reports tab ko power karta hai
+  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
+    Object.keys(state.dailyRecords).forEach(function(date) {
+      const t = computeDayTotals(date);
+      if (t) {
+        petrolSold += (t.petrolLiters || 0);
+        dieselSold += (t.dieselLiters || 0);
       }
     });
-  });
-  const initialPetrol = parseFloat(state.settings.initialPetrolStock) || 0;
-  const initialDiesel = parseFloat(state.settings.initialDieselStock) || 0;
+  }
+
+  const initialPetrol = parseFloat(state.settings && state.settings.initialPetrolStock) || 0;
+  const initialDiesel = parseFloat(state.settings && state.settings.initialDieselStock) || 0;
+
   return {
-    petrol: initialPetrol + petrolDelivered - petrolDispensed,
-    diesel: initialDiesel + dieselDelivered - dieselDispensed
+    petrol: (initialPetrol + petrolDelivered) - petrolSold,
+    diesel: (initialDiesel + dieselDelivered) - dieselSold
   };
 }
+  
 function interpolateDip(table, x) {
   if (x === null || x === undefined || isNaN(x)) return 0;
   if (x <= table[0][0]) return table[0][1];
@@ -1452,55 +1456,51 @@ function renderFooter() {
 }
 
 /* =========================================================
-   RENDER: DASHBOARD
-========================================================= */
-/* =========================================================
-   RENDER: DASHBOARD (FIXED MONTH & DATA FETCHING)
+   RENDER: DASHBOARD (SMART FILTER FIX)
 ========================================================= */
 function renderDashboard() {
-  // 1. Current Real Date (July 2026)
   const actualToday = todayStr();
   
-  // 2. Shift records me se latest date dhoondho
-  let today = actualToday;
+  // 🎯 SMART FILTER: Sirf wahi date "Latest" banegi jisme sach me Fuel bika ho (Liters Sold > 0)
+  let activeEntryDate = actualToday;
   if (state.dailyRecords && typeof state.dailyRecords === 'object') {
-    const datesWithEntries = Object.keys(state.dailyRecords).filter(d => {
-      const r = state.dailyRecords[d];
-      return r && (r.morning || r.evening);
+    const validShiftDates = Object.keys(state.dailyRecords).filter(function(d) {
+      const dayData = computeDayTotals(d);
+      // Agar total liters sold 0 se zyada hai, tabhi is date ko valid maano
+      return dayData && dayData.totalLiters > 0; 
     }).sort().reverse();
 
-    if (datesWithEntries.length > 0) {
-      today = datesWithEntries[0];
+    if (validShiftDates.length > 0) {
+      activeEntryDate = validShiftDates[0];
     }
   }
 
-  const isActuallyToday = today === actualToday;
-  const dayTotals = (typeof computeDayTotals === 'function') ? computeDayTotals(today) : { totalLiters:0, petrolLiters:0, dieselLiters:0, expectedRevenue:0, netVariance:0, expenseTotal:0 };
+  const isActuallyToday = activeEntryDate === actualToday;
+  const dayTotals = (typeof computeDayTotals === 'function') ? computeDayTotals(activeEntryDate) : { totalLiters:0, petrolLiters:0, dieselLiters:0, expectedRevenue:0, netVariance:0, expenseTotal:0 };
   const todayExpense = dayTotals.expenseTotal || 0;
-  
-  // 3. Fix Month Key (Calendar today ka month lo taaki future month pe jump na kare)
-  const currentMonthKey = monthKey(actualToday); // Strictly '2026-07'
+
+  const currentMonthKey = monthKey(actualToday); 
   
   const monthlyRevenue = (typeof getMonthlyRevenue === 'function') ? getMonthlyRevenue(currentMonthKey) : 0;
   const monthlyGrossProfit = (typeof getMonthlyProfit === 'function') ? getMonthlyProfit(currentMonthKey) : 0;
   const monthlyExpenses = (typeof getMonthlyExpenses === 'function') ? getMonthlyExpenses(currentMonthKey) : 0;
   const monthlyNetProfit = monthlyGrossProfit - monthlyExpenses;
   const monthlyUdhari = (typeof getMonthlyUdhari === 'function') ? getMonthlyUdhari(currentMonthKey) : 0;
+  
   const totalUdhariGiven = (typeof getTotalUdhariGivenAllTime === 'function') ? getTotalUdhariGivenAllTime() : 0;
   const remainingUdhari = (typeof getTotalOutstandingUdhari === 'function') ? getTotalOutstandingUdhari() : 0;
-  
+
   const varianceIsShort = dayTotals.netVariance < 0;
   const varianceLabel = varianceIsShort
     ? `Shortage: ${formatCurrency(Math.abs(dayTotals.netVariance))}`
     : `Surplus/Balanced: ${formatCurrency(dayTotals.netVariance)}`;
-  
+
   let monthLabel = currentMonthKey;
   try {
     monthLabel = new Date(actualToday + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
   } catch (e) {}
 
-  // Stock Summary
-  const stockSummary = (typeof calcCurrentStockSummary === 'function') ? calcCurrentStockSummary() : null;
+  const stockSummary = (typeof getRemainingStock === 'function') ? getRemainingStock() : null;
 
   return `
   <div class="space-y-6">
@@ -1528,7 +1528,7 @@ function renderDashboard() {
     <div class="rounded-2xl overflow-hidden shadow-lg" style="background: linear-gradient(135deg, #0A2540 0%, #123258 100%);">
       <div class="px-4 sm:px-6 pt-4 pb-1 flex items-center justify-between">
         <span class="text-[11px] font-bold text-[#F5A623] uppercase tracking-widest">
-          ${isActuallyToday ? 'Today' : 'Latest Entry'} &middot; ${formatDateDisplay(today)}
+          ${isActuallyToday ? 'Today' : 'Latest Entry'} &middot; ${formatDateDisplay(activeEntryDate)}
         </span>
         <span class="text-[10px] text-blue-200">Live</span>
       </div>
@@ -1549,7 +1549,7 @@ function renderDashboard() {
           <div class="text-[10px] text-blue-300 mt-1">After expenses</div>
         </div>
         <div class="bg-[#0A2540] px-4 sm:px-5 py-4">
-          <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Expenses (${formatDateDisplay(today)})</div>
+          <div class="text-[10px] font-semibold text-blue-200 uppercase tracking-wide">Expenses (${formatDateDisplay(activeEntryDate)})</div>
           <div id="dashTodayExpense" class="text-xl sm:text-2xl font-extrabold text-rose-400 mt-1">${formatCurrency(todayExpense)}</div>
           <div class="text-[10px] text-blue-300 mt-1">Rent, misc, etc.</div>
         </div>
@@ -1563,13 +1563,13 @@ function renderDashboard() {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="bg-emerald-50/60 border border-emerald-100 p-4 rounded-xl">
           <div class="text-xs font-bold text-emerald-800">Petrol Remaining</div>
-          <div class="text-2xl font-extrabold text-emerald-900 mt-1">${formatNum(stockSummary.petrolRemaining, 2)} L</div>
-          <div class="text-[11px] text-emerald-700 mt-1">Initial: ${formatNum(stockSummary.initialPetrol, 0)}L + Delivered: ${formatNum(stockSummary.deliveredPetrol, 0)}L - Sold: ${formatNum(stockSummary.soldPetrol, 0)}L</div>
+          <div class="text-2xl font-extrabold text-emerald-900 mt-1">${formatNum(stockSummary.petrol, 2)} L</div>
+          <div class="text-[11px] text-emerald-700 mt-1">Initial + Deliveries &minus; Sold (All Time)</div>
         </div>
         <div class="bg-blue-50/60 border border-blue-100 p-4 rounded-xl">
           <div class="text-xs font-bold text-blue-800">Diesel Remaining</div>
-          <div class="text-2xl font-extrabold text-blue-900 mt-1">${formatNum(stockSummary.dieselRemaining, 2)} L</div>
-          <div class="text-[11px] text-blue-700 mt-1">Initial: ${formatNum(stockSummary.initialDiesel, 0)}L + Delivered: ${formatNum(stockSummary.deliveredDiesel, 0)}L - Sold: ${formatNum(stockSummary.soldDiesel, 0)}L</div>
+          <div class="text-2xl font-extrabold text-blue-900 mt-1">${formatNum(stockSummary.diesel, 2)} L</div>
+          <div class="text-[11px] text-blue-700 mt-1">Initial + Deliveries &minus; Sold (All Time)</div>
         </div>
       </div>
     </div>
