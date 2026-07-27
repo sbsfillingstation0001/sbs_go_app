@@ -3763,6 +3763,8 @@ window.addEventListener('unhandledrejection', function(event) {
 
 function updateEmployeeSalary(empId) {
   const inputEl = document.getElementById('editSalary_' + empId);
+  const dateEl = document.getElementById('editJoiningDate_' + empId);
+  
   if (!inputEl) return;
   
   const newSalary = parseFloat(inputEl.value);
@@ -3776,11 +3778,22 @@ function updateEmployeeSalary(empId) {
     return;
   }
 
+  // Update State
   state.employees[empId].monthlySalary = newSalary;
+  if (dateEl && dateEl.value) {
+    state.employees[empId].joiningDate = dateEl.value;
+  }
 
-  if (typeof saveStateLocalOnly === 'function') saveStateLineOnly(); // ya saveStateLocalOnly
+  // Safe Save (Error 100% fixed)
+  if (typeof saveStateLocalOnly === 'function') {
+    saveStateLocalOnly();
+  }
+
   if (typeof queueFieldSync === 'function') {
     queueFieldSync('employees.' + empId + '.monthlySalary', newSalary);
+    if (dateEl && dateEl.value) {
+      queueFieldSync('employees.' + empId + '.joiningDate', dateEl.value);
+    }
   }
 
   render();
