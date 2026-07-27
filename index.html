@@ -1019,23 +1019,33 @@ function deleteExpense(date, expenseId) {
 }
 
 /* =========================================================
-   EMPLOYEES / SALARY
+   EMPLOYEES / SALARY (WITH JOINING DATE & CUSTOM CYCLE)
 ========================================================= */
+
 function getTotalMonthlySalary() {
   return Object.values(state.employees || {}).reduce((sum, e) => sum + (parseFloat(e.monthlySalary) || 0), 0);
 }
-function addEmployee(name, monthlySalary) {
+
+function addEmployee(name, monthlySalary, joiningDate) {
   const amt = parseFloat(monthlySalary);
+  const jDate = joiningDate || todayStr();
   if (!name || isNaN(amt) || amt <= 0) {
     alert('Please enter a valid employee name and monthly salary.');
     return;
   }
   const id = uid();
-  state.employees[id] = { id: id, name: name, monthlySalary: amt, advances: {} };
+  state.employees[id] = { 
+    id: id, 
+    name: name, 
+    monthlySalary: amt, 
+    joiningDate: jDate, // 👈 Employee ki joining/cycle date
+    advances: {} 
+  };
   saveStateLocalOnly();
   queueFieldSync('employees.' + id, state.employees[id]);
   render();
 }
+
 function deleteEmployee(id) {
   if (!confirm('Remove this employee from the salary list?')) return;
   delete state.employees[id];
@@ -1044,17 +1054,59 @@ function deleteEmployee(id) {
   queueFieldSync('employees.' + id, firebase.firestore.FieldValue.delete());
   render();
 }
+
 function submitEmployeeForm() {
   const nameEl = document.getElementById('employeeNameInput');
   const salaryEl = document.getElementById('employeeSalaryInput');
+  const dateEl = document.getElementById('employeeJoiningDateInput'); // Optional joining date input if available on top form
+  
   const name = nameEl ? nameEl.value.trim() : '';
   const salary = salaryEl ? salaryEl.value : '';
-  addEmployee(name, salary);
+  const joiningDate = dateEl && dateEl.value ? dateEl.value : todayStr();
+  
+  addEmployee(name, salary, joiningDate);
 }
+
+function updateEmployeeSalary(empId) {
+  const inputEl = document.getElementById('editSalary_' + empId);
+  const dateEl = document.getElementById('editJoiningDate_' + empId);
+  
+  if (!inputEl) return;
+  
+  const newSalary = parseFloat(inputEl.value);
+  if (isNaN(newSalary) || newSalary < 0) {
+    alert('Please enter a valid salary amount.');
+    return;
+  }
+
+  if (!state.employees || !state.employees[empId]) {
+    alert('Employee not found.');
+    return;
+  }
+
+  // Update State
+  state.employees[empId].monthlySalary = newSalary;
+  if (dateEl && dateEl.value) {
+    state.employees[empId].joiningDate = dateEl.value;
+  }
+
+  // Save Local & Firebase Sync
+  if (typeof saveStateLocalOnly === 'function') saveStateLocalOnly();
+  if (typeof queueFieldSync === 'function') {
+    queueFieldSync('employees.' + empId + '.monthlySalary', newSalary);
+    if (dateEl && dateEl.value) {
+      queueFieldSync('employees.' + empId + '.joiningDate', dateEl.value);
+    }
+  }
+
+  render();
+}
+
 function toggleEmployeeExpand(id) {
   expandedEmployeeId = (expandedEmployeeId === id) ? null : id;
   render();
 }
+
 function addAdvance(employeeId, date, amount) {
   const amt = parseFloat(amount);
   if (isNaN(amt) || amt <= 0) {
@@ -1070,6 +1122,7 @@ function addAdvance(employeeId, date, amount) {
   queueFieldSync('employees.' + employeeId + '.advances.' + advId, e.advances[advId]);
   render();
 }
+
 function deleteAdvance(employeeId, advId) {
   const e = state.employees[employeeId];
   if (!e || !e.advances) return;
@@ -1078,6 +1131,7 @@ function deleteAdvance(employeeId, advId) {
   queueFieldSync('employees.' + employeeId + '.advances.' + advId, firebase.firestore.FieldValue.delete());
   render();
 }
+
 function submitAdvanceForm(employeeId) {
   const dateEl = document.getElementById('advDate_' + employeeId);
   const amtEl = document.getElementById('advAmount_' + employeeId);
@@ -1085,6 +1139,7 @@ function submitAdvanceForm(employeeId) {
   const amount = amtEl ? amtEl.value : '';
   addAdvance(employeeId, date, amount);
 }
+
 function getEmployeeAdvanceTotalForMonth(employeeId, monthKeyStr) {
   const e = state.employees[employeeId];
   if (!e || !e.advances) return 0;
@@ -1092,12 +1147,18 @@ function getEmployeeAdvanceTotalForMonth(employeeId, monthKeyStr) {
     .filter(a => monthKey(a.date) === monthKeyStr)
     .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
 }
+
 function getTotalAdvancesForMonth(monthKeyStr) {
   let total = 0;
   Object.keys(state.employees || {}).forEach(id => {
     total += getEmployeeAdvanceTotalForMonth(id, monthKeyStr);
   });
   return total;
+}
+
+function onSalaryMonthChange(value) {
+  selectedSalaryMonth = value;
+  render();
 }
 
 /* =========================================================
@@ -1730,7 +1791,7 @@ function updateDashboardComputedUI() {
   }
 }
 /* =========================================================
-   RENDER: SHIFT ENTRY (EXPENSES SORTED DESCENDING)
+   RENDER: SHIFT ENTRY (WITH PERSONAL EXPENSES & SORTING)
 ========================================================= */
 function renderEntry() {
   const date = selectedEntryDate;
@@ -1844,9 +1905,10 @@ function renderEntry() {
       </div>
     </div>
 
+    <!-- 1. DAILY EXPENSES (PETROL PUMP EXPENSES) -->
     <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5">
-      <h2 class="text-base font-bold mb-1">Daily Expenses &ndash; ${formatDateDisplay(date)}</h2>
-      <p class="text-xs text-[#5A6B82] mb-3">Rent, salary, electricity, maintenance, or any other daily business expense. This is subtracted from profit, and is treated as cash already spent when reconciling the day's cash below.</p>
+      <h2 class="text-base font-bold mb-1">Daily Expenses (Petrol Pump) &ndash; ${formatDateDisplay(date)}</h2>
+      <p class="text-xs text-[#5A6B82] mb-3">Rent, salary, electricity, maintenance, or any other business expense. Subtracted from profit and treated as cash spent for reconciliation.</p>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
         <input id="expenseDescInput" type="text" placeholder="Expense description (e.g. Staff Salary)"
           class="sm:col-span-2 border border-[#DCE3EC] rounded-lg px-3 py-2">
@@ -1869,11 +1931,8 @@ function renderEntry() {
             ${(function() {
               const rec = ensureRecord(date);
               const list = Object.values(rec.expenses || {});
-              if (!list.length) return `<tr><td colspan="3" class="py-3 text-center text-[#5A6B82]">No expenses added for this day yet.</td></tr>`;
-              
-              // 🔽 Expense Sorting: High Amount to Low Amount (Descending)
+              if (!list.length) return `<tr><td colspan="3" class="py-3 text-center text-[#5A6B82]">No daily expenses added yet.</td></tr>`;
               const sortedList = list.sort((a, b) => safeParseFloat(b.amount, 0) - safeParseFloat(a.amount, 0));
-
               return sortedList.map(ex => `
                 <tr class="border-b border-[#EEF1F5]">
                   <td class="py-2 pr-2">${escapeHtml(ex.description || ex.title || 'Expense')}</td>
@@ -1884,7 +1943,7 @@ function renderEntry() {
           </tbody>
           <tfoot>
             <tr class="border-t-2 border-[#0A2540] font-bold">
-              <td class="py-2">Total Today's Expenses</td>
+              <td class="py-2">Total Petrol Pump Expenses</td>
               <td class="py-2" colspan="2">${formatCurrency(dayTotals.expenseTotal)}</td>
             </tr>
           </tfoot>
@@ -1892,168 +1951,102 @@ function renderEntry() {
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end mt-4 pt-4 border-t border-[#EEF1F5]">
         <div>
-          <label class="text-xs font-semibold text-[#5A6B82]">Day's Total Accounted (Both Shifts + Expenses)</label>
+          <label class="text-xs font-semibold text-[#5A6B82]">Day's Total Accounted (Both Shifts + Petrol Pump Expenses)</label>
           <div class="mt-1 text-lg font-bold text-[#0A2540]">${formatCurrency(dayTotals.totalAccounted + dayTotals.expenseTotal)}</div>
         </div>
         <div>
-          <label class="text-xs font-semibold text-[#5A6B82]">Day's Cash Variance (After Expenses)</label>
+          <label class="text-xs font-semibold text-[#5A6B82]">Day's Cash Variance (After Petrol Pump Expenses)</label>
           <div class="mt-1 text-lg font-extrabold ${dayTotals.netVariance < 0 ? 'text-red-600' : 'text-green-600'}">${dayTotals.netVariance < 0 ? 'Shortage: ' + formatCurrency(Math.abs(dayTotals.netVariance)) : 'Surplus/Balanced: ' + formatCurrency(dayTotals.netVariance)}</div>
         </div>
+      </div>
+    </div>
+
+    <!-- 2. PERSONAL EXPENSES -->
+    <div class="bg-white rounded-2xl card-shadow p-4 sm:p-5">
+      <h2 class="text-base font-bold mb-1">Personal Expenses &ndash; ${formatDateDisplay(date)}</h2>
+      <p class="text-xs text-[#5A6B82] mb-3">Personal or drawing expenses. Included in total expenses but kept separate from pump cash reconciliation.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+        <input id="personalExpenseDescInput" type="text" placeholder="Personal expense description"
+          class="sm:col-span-2 border border-[#DCE3EC] rounded-lg px-3 py-2">
+        <div class="flex gap-2">
+          <input id="personalExpenseAmountInput" type="number" step="0.01" placeholder="Amount ₹"
+            class="num-input flex-1 border border-[#DCE3EC] rounded-lg px-3 py-2">
+          <button onclick="submitPersonalExpenseForm('${date}')" class="bg-[#0A2540] text-[#F5A623] font-bold px-4 py-2 rounded-lg whitespace-nowrap">+ Add</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto -mx-2 px-2">
+        <table class="w-full text-sm min-w-[400px]">
+          <thead>
+            <tr class="text-left text-[#5A6B82] text-xs uppercase border-b border-[#DCE3EC]">
+              <th class="py-2 pr-2">Description</th>
+              <th class="py-2 pr-2">Amount</th>
+              <th class="py-2 pr-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(function() {
+              const rec = ensureRecord(date);
+              const list = Object.values(rec.personalExpenses || {});
+              if (!list.length) return `<tr><td colspan="3" class="py-3 text-center text-[#5A6B82]">No personal expenses added yet.</td></tr>`;
+              const sortedList = list.sort((a, b) => safeParseFloat(b.amount, 0) - safeParseFloat(a.amount, 0));
+              return sortedList.map(ex => `
+                <tr class="border-b border-[#EEF1F5]">
+                  <td class="py-2 pr-2">${escapeHtml(ex.description || 'Personal Expense')}</td>
+                  <td class="py-2 pr-2 font-semibold">${formatCurrency(ex.amount)}</td>
+                  <td class="py-2 pr-2"><button onclick="deletePersonalExpense('${date}','${ex.id}')" class="text-red-600 font-bold text-xs">Delete</button></td>
+                </tr>`).join('');
+            })()}
+          </tbody>
+          <tfoot>
+            <tr class="border-t-2 border-[#0A2540] font-bold">
+              <td class="py-2">Total Personal Expenses</td>
+              <td class="py-2" colspan="2">${formatCurrency(dayTotals.personalExpenseTotal || 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="mt-4 pt-4 border-t border-[#EEF1F5] flex justify-between items-center">
+        <div class="text-xs font-bold text-[#5A6B82] uppercase">Combined Total Expenses (Pump + Personal)</div>
+        <div class="text-lg font-extrabold text-red-600">${formatCurrency(dayTotals.expenseTotal + (dayTotals.personalExpenseTotal || 0))}</div>
       </div>
     </div>
   </div>`;
 }
 
-function submitExpenseForm(date) {
-  const descEl = document.getElementById('expenseDescInput');
-  const amtEl = document.getElementById('expenseAmountInput');
+// 📌 Personal Expense Helper Functions
+function submitPersonalExpenseForm(date) {
+  const descEl = document.getElementById('personalExpenseDescInput');
+  const amtEl = document.getElementById('personalExpenseAmountInput');
   const description = descEl ? descEl.value.trim() : '';
   const amount = amtEl ? amtEl.value : '';
   if (!description || !amount || isNaN(parseFloat(amount))) {
     alert('Please enter a valid description and amount.');
     return;
   }
-  addExpense(date, description, amount);
+  addPersonalExpense(date, description, amount);
   if (descEl) descEl.value = '';
   if (amtEl) amtEl.value = '';
 }
 
-function renderMachineGroups(date, shiftName, shift) {
-  let html = '';
-  let lastMachine = null;
-  NOZZLES.forEach(nz => {
-    const machine = NOZZLE_MACHINE[nz];
-    if (machine !== lastMachine) {
-      html += `<tr class="bg-[#EEF1F5]"><td colspan="7" class="py-1.5 px-2 text-[11px] font-bold text-[#5A6B82] uppercase tracking-wide">${machine}</td></tr>`;
-      lastMachine = machine;
-    }
-    html += renderNozzleRow(date, shiftName, nz, shift);
-  });
-  return html;
-}
-
-function renderNozzleRow(date, shiftName, nz, shift) {
-  const n = shift.nozzles[nz];
-  const fuel = NOZZLE_FUEL[nz];
-  const sold = computeNozzleSoldLiters(n);
-  const rate = (shift.rates && shift.rates[fuel]) || 0;
-  const revenue = sold * rate;
-  return `
-    <tr class="border-b border-[#EEF1F5]">
-      <td class="py-2 pr-2 font-bold">${NOZZLE_LABEL[nz]}</td>
-      <td class="py-2 pr-2">
-        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${fuel === 'petrol' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}">${fuel === 'petrol' ? 'Petrol' : 'Diesel'}</span>
-      </td>
-      <td class="py-2 pr-2">
-        <input type="number" step="0.01" class="num-input w-24 border border-[#DCE3EC] rounded-lg px-2 py-1.5"
-          value="${n.start === null ? '' : n.start}" oninput="onNozzleInput('${date}','${shiftName}','${nz}','start', this.value)">
-      </td>
-      <td class="py-2 pr-2">
-        <input type="number" step="0.01" class="num-input w-24 border border-[#DCE3EC] rounded-lg px-2 py-1.5"
-          value="${n.end === null ? '' : n.end}" oninput="onNozzleInput('${date}','${shiftName}','${nz}','end', this.value)">
-      </td>
-      <td class="py-2 pr-2">
-        <input type="number" step="0.01" class="num-input w-20 border border-[#DCE3EC] rounded-lg px-2 py-1.5"
-          value="${n.test === null ? '' : n.test}" oninput="onNozzleInput('${date}','${shiftName}','${nz}','test', this.value)" placeholder="0">
-      </td>
-      <td class="py-2 pr-2 font-semibold"><span id="liters_${shiftName}_${nz}">${formatNum(sold)}</span> L</td>
-      <td class="py-2 pr-2 font-semibold"><span id="revenue_${shiftName}_${nz}">${formatCurrency(revenue)}</span></td>
-    </tr>`;
-}
-
-function cashVarianceClass(shift) {
-  const t = computeShiftTotals(shift);
-  return t.variance < 0 ? 'text-red-600' : 'text-green-600';
-}
-
-function cashVarianceLabel(shift) {
-  const t = computeShiftTotals(shift);
-  return t.variance < 0 ? `Shortage: ${formatCurrency(Math.abs(t.variance))}` : `Surplus/Balanced: ${formatCurrency(t.variance)}`;
-}
-
-function onEntryDateChange(value) {
-  selectedEntryDate = value;
-  render();
-}
-
-function switchShiftTab(tab) {
-  activeShiftTab = tab;
-  render();
-}
-
-function syncEveningFromMorning(date) {
+function addPersonalExpense(date, description, amount) {
   const rec = ensureRecord(date);
-  const evening = ensureShift(date, 'evening');
-  if (rec.morning) {
-    NOZZLES.forEach(nz => {
-      const morningEnd = rec.morning.nozzles[nz] ? rec.morning.nozzles[nz].end : null;
-      if (morningEnd !== null && morningEnd !== undefined) {
-        evening.nozzles[nz].start = morningEnd;
-        queueFieldSync('dailyRecords.' + date + '.evening.nozzles.' + nz + '.start', morningEnd);
-      }
-    });
-  }
+  if (!rec.personalExpenses) rec.personalExpenses = {};
+  const id = uid();
+  const amt = parseFloat(amount) || 0;
+  rec.personalExpenses[id] = { id: id, description: description, amount: amt };
   saveStateLocalOnly();
+  queueFieldSync('dailyRecords.' + date + '.personalExpenses.' + id, rec.personalExpenses[id]);
   render();
 }
 
-function onShiftRateInput(date, shiftName, fuelType, value) {
-  const shift = ensureShift(date, shiftName);
-  if (!shift.rates) shift.rates = {};
-  const v = parseFloat(value);
-  shift.rates[fuelType] = isNaN(v) ? 0 : v;
+function deletePersonalExpense(date, id) {
+  const rec = ensureRecord(date);
+  if (!rec.personalExpenses || !rec.personalExpenses[id]) return;
+  delete rec.personalExpenses[id];
   saveStateLocalOnly();
-  queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.rates.' + fuelType, shift.rates[fuelType]);
-  updateShiftComputedUI(date, shiftName);
+  queueFieldSync('dailyRecords.' + date + '.personalExpenses.' + id, firebase.firestore.FieldValue.delete());
+  render();
 }
-
-function onNozzleInput(date, shiftName, nz, field, value) {
-  const shift = ensureShift(date, shiftName);
-  const v = value === '' ? null : parseFloat(value);
-  shift.nozzles[nz][field] = (v === null || isNaN(v)) ? null : v;
-  saveStateLocalOnly();
-  queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.nozzles.' + nz + '.' + field, shift.nozzles[nz][field]);
-  updateShiftComputedUI(date, shiftName);
-}
-
-function onPaymentInput(date, shiftName, field, value) {
-  const shift = ensureShift(date, shiftName);
-  const v = value === '' ? null : parseFloat(value);
-  shift[field] = (v === null || isNaN(v)) ? null : v;
-  saveStateLocalOnly();
-  queueFieldSync('dailyRecords.' + date + '.' + shiftName + '.' + field, shift[field]);
-  updateShiftComputedUI(date, shiftName);
-}
-
-function updateShiftComputedUI(date, shiftName) {
-  if (activeTab !== 'entry' || activeShiftTab !== shiftName || selectedEntryDate !== date) return;
-  const shift = ensureShift(date, shiftName);
-  NOZZLES.forEach(nz => {
-    const n = shift.nozzles[nz];
-    const fuel = NOZZLE_FUEL[nz];
-    const sold = computeNozzleSoldLiters(n);
-    const revenue = sold * ((shift.rates && shift.rates[fuel]) || 0);
-    const litersEl = document.getElementById(`liters_${shiftName}_${nz}`);
-    const revEl = document.getElementById(`revenue_${shiftName}_${nz}`);
-    if (litersEl) litersEl.textContent = formatNum(sold);
-    if (revEl) revEl.textContent = formatCurrency(revenue);
-  });
-  const totals = computeShiftTotals(shift);
-  const totalLitersEl = document.getElementById('shiftTotalLiters');
-  const totalRevenueEl = document.getElementById('shiftTotalRevenue');
-  const expectedRevenue2El = document.getElementById('shiftExpectedRevenue2');
-  const totalAccountedEl = document.getElementById('shiftTotalAccounted');
-  const varianceEl = document.getElementById('shiftVarianceDisplay');
-  if (totalLitersEl) totalLitersEl.textContent = formatNum(totals.totalLiters);
-  if (totalRevenueEl) totalRevenueEl.textContent = formatCurrency(totals.expectedRevenue);
-  if (expectedRevenue2El) expectedRevenue2El.textContent = formatCurrency(totals.expectedRevenue);
-  if (totalAccountedEl) totalAccountedEl.textContent = formatCurrency(totals.totalAccounted);
-  if (varianceEl) {
-    varianceEl.textContent = cashVarianceLabel(shift);
-    varianceEl.className = 'mt-1 text-lg font-extrabold ' + cashVarianceClass(shift);
-  }
-}
-
 
 /* =========================================================
    RENDER: DELIVERIES (STOCK LOGIC FIXED)
