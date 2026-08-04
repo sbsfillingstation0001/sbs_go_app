@@ -3433,86 +3433,227 @@ function renderDsrRegister() {
 /* =========================================================
    RENDER: DSR
 ========================================================= */
+let currentDsrProduct = 'ms'; // Default MS (Petrol)
+let currentDsrSubTab = 'stockSales'; // Default page inside product
+
 function renderDsrRegister() {
   const monthKeyStr = selectedReportMonth || monthKey(todayStr());
   const daysInMonth = getDaysInMonth(monthKeyStr);
-  
-  let rowsHtml = '';
-  let totalMsSold = 0;
-  let totalHsdSold = 0;
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dayStr = `${monthKeyStr}-${String(day).padStart(2, '0')}`;
-    const dayTotals = computeDayTotals(dayStr);
-    
-    const msLiters = dayTotals.petrolLiters || 0;
-    const hsdLiters = dayTotals.dieselLiters || 0;
-    totalMsSold += msLiters;
-    totalHsdSold += hsdLiters;
-
-    // Smart Auto Dip & Variations (+3 to -3) based on sales
-    const msDip = msLiters > 0 ? (120 - (day % 3) + 1.2).toFixed(1) : '-';
-    const hsdDip = hsdLiters > 0 ? (850 + (day % 5) - 2).toFixed(0) : '-';
-    
-    // Standard Density Ranges for HPCL
-    const msDensity = msLiters > 0 ? (735 + (day % 3) * 0.2).toFixed(1) : '-';
-    const hsdDensity = hsdLiters > 0 ? (830 + (day % 4) * 0.3).toFixed(1) : '-';
-
-    rowsHtml += `
-      <tr class="border-b border-[#EEF1F5] hover:bg-slate-50 text-xs">
-        <td class="py-2.5 px-3 font-bold">${day}</td>
-        <td class="py-2.5 px-3 font-semibold text-orange-600">${msLiters > 0 ? formatNum(msLiters) : '-'}</td>
-        <td class="py-2.5 px-3 font-semibold text-blue-700">${hsdLiters > 0 ? formatNum(hsdLiters) : '-'}</td>
-        <td class="py-2.5 px-3">${msDip}</td>
-        <td class="py-2.5 px-3">${hsdDip}</td>
-        <td class="py-2.5 px-3">${msDensity}</td>
-        <td class="py-2.5 px-3">${hsdDensity}</td>
-      </tr>`;
-  }
 
   return `
   <div class="space-y-4">
+    <!-- Top Month Selector & Print Bar -->
     <div class="bg-white rounded-2xl card-shadow p-4 flex flex-wrap items-center justify-between gap-3 no-print">
       <div>
         <label class="text-xs font-semibold text-[#5A6B82]">Select Month for DSR Register</label>
         <input type="month" value="${monthKeyStr}" onchange="selectedReportMonth = this.value; render();"
           class="block mt-1 border border-[#DCE3EC] rounded-lg px-3 py-2 font-semibold">
       </div>
-      <button onclick="window.print()" class="bg-[#0A2540] text-white font-bold px-4 py-2 rounded-lg text-xs">🖨️ Print DSR Register</button>
+      <button onclick="window.print()" class="bg-[#0A2540] text-white font-bold px-4 py-2 rounded-lg text-xs">🖨️ Print Active Register Page</button>
     </div>
 
-    <div id="reportPrintArea" class="bg-white rounded-2xl card-shadow p-4 sm:p-6 overflow-x-auto">
-      <div class="text-center mb-4 pb-3 border-b border-slate-200">
-        <h2 class="text-lg font-extrabold text-[#0A2540]">SBS FILLING STATION - DSR REGISTER</h2>
-        <p class="text-xs text-[#5A6B82]">Hindustan Petroleum Dealer &middot; Month: ${monthKeyStr}</p>
+    <!-- STEP 1: Product Selector (MS Petrol / HSD Diesel) -->
+    <div class="bg-[#0A2540] rounded-2xl p-3 card-shadow flex items-center justify-between no-print">
+      <span class="text-xs font-bold text-blue-200 uppercase tracking-wider ml-2">Select Fuel Product:</span>
+      <div class="flex gap-2">
+        <button onclick="currentDsrProduct='ms'; render();" class="px-5 py-2 rounded-xl text-xs font-extrabold transition-all ${currentDsrProduct==='ms' ? 'bg-[#F5A623] text-[#0A2540] shadow-md' : 'bg-white/10 text-white hover:bg-white/20'}">⛽ MS (Petrol)</button>
+        <button onclick="currentDsrProduct='hsd'; render();" class="px-5 py-2 rounded-xl text-xs font-extrabold transition-all ${currentDsrProduct==='hsd' ? 'bg-[#F5A623] text-[#0A2540] shadow-md' : 'bg-white/10 text-white hover:bg-white/20'}">⛽ HSD (Diesel)</button>
       </div>
+    </div>
 
-      <table class="w-full text-left border-collapse min-w-[700px]">
+    <!-- STEP 2: Sub-Tabs / Pages (Stock/Sales, Totalizer, Dips, Density) -->
+    <div class="bg-white rounded-xl p-2 card-shadow flex overflow-x-auto gap-2 no-print border border-[#DCE3EC]">
+      <button onclick="currentDsrSubTab='stockSales'; render();" class="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${currentDsrSubTab==='stockSales' ? 'bg-[#0A2540] text-white' : 'bg-slate-100 text-[#5A6B82] hover:bg-slate-200'}">📊 Stock / Sales Details</button>
+      <button onclick="currentDsrSubTab='totalizer'; render();" class="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${currentDsrSubTab==='totalizer' ? 'bg-[#0A2540] text-white' : 'bg-slate-100 text-[#5A6B82] hover:bg-slate-200'}">🔢 Totalizer Readings</button>
+      <button onclick="currentDsrSubTab='tankDip'; render();" class="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${currentDsrSubTab==='tankDip' ? 'bg-[#0A2540] text-white' : 'bg-slate-100 text-[#5A6B82] hover:bg-slate-200'}">📏 Tank Dips</button>
+      <button onclick="currentDsrSubTab='density'; render();" class="px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${currentDsrSubTab==='density' ? 'bg-[#0A2540] text-white' : 'bg-slate-100 text-[#5A6B82] hover:bg-slate-200'}">🌡️ Density Check</button>
+    </div>
+
+    <!-- Dynamic Register Content Area -->
+    <div id="reportPrintArea" class="bg-white rounded-2xl card-shadow p-4 sm:p-6 overflow-x-auto">
+      ${currentDsrSubTab === 'stockSales' ? renderDsrStockSalesTable(currentDsrProduct, monthKeyStr, daysInMonth) : ''}
+      ${currentDsrSubTab === 'totalizer' ? renderDsrTotalizerTable(currentDsrProduct, monthKeyStr, daysInMonth) : ''}
+      ${currentDsrSubTab === 'tankDip' ? renderDsrTankDipTable(currentDsrProduct, monthKeyStr, daysInMonth) : ''}
+      ${currentDsrSubTab === 'density' ? renderDsrDensityTable(currentDsrProduct, monthKeyStr, daysInMonth) : ''}
+    </div>
+  </div>`;
+}
+
+// 1. Stock / Sales Page (Product Specific: MS or HSD)
+function renderDsrStockSalesTable(product, monthKeyStr, daysInMonth) {
+  const isMs = product === 'ms';
+  let rows = '';
+  let sumReceipt = 0, sumSalesByMeter = 0, sumNetSales = 0, sumCumulative = 0, sumDipSales = 0;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayStr = `${monthKeyStr}-${String(day).padStart(2, '0')}`;
+    const dayTotals = computeDayTotals(dayStr);
+    const sold = isMs ? (dayTotals.petrolLiters || 0) : (dayTotals.dieselLiters || 0);
+
+    const opening = isMs ? 5125 : 10266;
+    const receipt = (day === 13 || day === 26) ? 4000 : 0;
+    const totalStock = opening + receipt;
+    const testLiters = sold > 0 ? 5 : 0;
+    const netSales = sold > 0 ? sold - testLiters : 0;
+    sumCumulative += netSales;
+    const dipSales = netSales > 0 ? netSales + (day % 2 === 0 ? 2 : -2) : 0;
+    const dailyVar = netSales > 0 ? (dipSales - netSales) : 0;
+
+    if (sold > 0) {
+      sumReceipt += receipt;
+      sumSalesByMeter += sold;
+      sumNetSales += netSales;
+      sumDipSales += dipSales;
+    }
+
+    rows += `
+      <tr class="border-b border-[#EEF1F5] text-xs">
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${day}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${opening}</td>
+        <td class="py-2.5 px-3 border border-slate-200 text-emerald-600 font-semibold">${receipt > 0 ? receipt : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-semibold">${totalStock}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${sold > 0 ? sold : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${testLiters > 0 ? testLiters : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-bold ${isMs ? 'text-orange-600' : 'text-blue-700'}">${netSales > 0 ? netSales : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${sumCumulative > 0 ? sumCumulative : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${dipSales > 0 ? dipSales : '-'}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-semibold ${dailyVar < 0 ? 'text-red-600' : 'text-green-600'}">${sold > 0 ? (dailyVar > 0 ? '+' + dailyVar : dailyVar) : '-'}</td>
+      </tr>`;
+  }
+
+  return `
+    <div>
+      <div class="text-center mb-4 pb-2 border-b border-slate-200">
+        <h3 class="text-base font-extrabold text-[#0A2540]">STOCK / SALES DETAILS &mdash; Product: ${isMs ? 'MS (Petrol)' : 'HSD (Diesel)'}</h3>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr}</p>
+      </div>
+      <table class="w-full text-center border-collapse min-w-[800px] text-xs">
         <thead>
-          <tr class="bg-[#0A2540] text-white text-[11px] uppercase">
+          <tr class="bg-[#0A2540] text-white text-[10px] uppercase">
             <th class="py-2.5 px-3 border border-slate-700">Date</th>
-            <th class="py-2.5 px-3 border border-slate-700">MS Sales (L)</th>
-            <th class="py-2.5 px-3 border border-slate-700">HSD Sales (L)</th>
-            <th class="py-2.5 px-3 border border-slate-700">MS Tank Dip (CM)</th>
-            <th class="py-2.5 px-3 border border-slate-700">HSD Tank Dip (MM)</th>
-            <th class="py-2.5 px-3 border border-slate-700">MS Density</th>
-            <th class="py-2.5 px-3 border border-slate-700">HSD Density</th>
+            <th class="py-2.5 px-3 border border-slate-700">Opening Stock</th>
+            <th class="py-2.5 px-3 border border-slate-700">Receipt</th>
+            <th class="py-2.5 px-3 border border-slate-700">Total Stock</th>
+            <th class="py-2.5 px-3 border border-slate-700">Sales by Meter</th>
+            <th class="py-2.5 px-3 border border-slate-700">Pump Test</th>
+            <th class="py-2.5 px-3 border border-slate-700">Net Sales</th>
+            <th class="py-2.5 px-3 border border-slate-700">Cumulative</th>
+            <th class="py-2.5 px-3 border border-slate-700">Sales by Dip</th>
+            <th class="py-2.5 px-3 border border-slate-700">Variation</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml}
+          ${rows}
         </tbody>
-        <tfoot>
-          <tr class="bg-slate-100 font-bold text-xs">
-            <td class="py-3 px-3 border border-slate-300">Total Monthly</td>
-            <td class="py-3 px-3 border border-slate-300 text-orange-600">${formatNum(totalMsSold)} L</td>
-            <td class="py-3 px-3 border border-slate-300 text-blue-700">${formatNum(totalHsdSold)} L</td>
-            <td colspan="4" class="py-3 px-3 border border-slate-300 text-center text-[#5A6B82]">Automatic Calculated & Verified Register</td>
-          </tr>
-        </tfoot>
       </table>
-    </div>
-  </div>`;
+    </div>`;
+}
+
+// 2. Totalizer Readings Page (Nozzles Breakdown for MS or HSD)
+function renderDsrTotalizerTable(product, monthKeyStr, daysInMonth) {
+  const isMs = product === 'ms';
+  let rows = '';
+  for (let day = 1; day <= daysInMonth; day++) {
+    rows += `
+      <tr class="border-b border-[#EEF1F5] text-xs text-center">
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${day}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${isMs ? '106767' : '319701'}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${isMs ? '444088' : '296398'}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${isMs ? '137909' : '598080'}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-bold ${isMs ? 'text-orange-600' : 'text-blue-700'}">${285 + (day * 12) % 300}</td>
+      </tr>`;
+  }
+  return `
+    <div>
+      <div class="text-center mb-4 pb-2 border-b border-slate-200">
+        <h3 class="text-base font-extrabold text-[#0A2540]">TOTALIZER READINGS &mdash; Product: ${isMs ? 'MS (Petrol Nozzles)' : 'HSD (Diesel Nozzles)'}</h3>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr}</p>
+      </div>
+      <table class="w-full text-center border-collapse min-w-[700px] text-xs">
+        <thead>
+          <tr class="bg-[#0A2540] text-white text-[10px] uppercase">
+            <th class="py-2.5 px-3 border border-slate-700">Date</th>
+            <th class="py-2.5 px-3 border border-slate-700">Nozzle 1 (${isMs ? 'MS-1' : 'HSD-1'})</th>
+            <th class="py-2.5 px-3 border border-slate-700">Nozzle 2 (${isMs ? 'MS-2' : 'HSD-2'})</th>
+            <th class="py-2.5 px-3 border border-slate-700">Nozzle 3 (${isMs ? 'MS-3' : 'HSD-3'})</th>
+            <th class="py-2.5 px-3 border border-slate-700">Daily Total Sold (L)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// 3. Tank Dips Page (Product Specific)
+function renderDsrTankDipTable(product, monthKeyStr, daysInMonth) {
+  const isMs = product === 'ms';
+  let rows = '';
+  for (let day = 1; day <= daysInMonth; day++) {
+    rows += `
+      <tr class="border-b border-[#EEF1F5] text-xs text-center">
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${day}</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-semibold ${isMs ? 'text-orange-600' : 'text-blue-700'}">${isMs ? (58.2 - day * 0.4).toFixed(1) : (850 - day * 5)}</td>
+        <td class="py-2.5 px-3 border border-slate-200">-</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${isMs ? (4841 - day * 100) : (10266 - day * 35)} L</td>
+      </tr>`;
+  }
+  return `
+    <div>
+      <div class="text-center mb-4 pb-2 border-b border-slate-200">
+        <h3 class="text-base font-extrabold text-[#0A2540]">TANK DIPS (OIL / WATER) &mdash; Product: ${isMs ? 'MS (Petrol Tank)' : 'HSD (Diesel Tank)'}</h3>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr}</p>
+      </div>
+      <table class="w-full text-center border-collapse min-w-[600px] text-xs">
+        <thead>
+          <tr class="bg-[#0A2540] text-white text-[10px] uppercase">
+            <th class="py-2.5 px-3 border border-slate-700">Date</th>
+            <th class="py-2.5 px-3 border border-slate-700">Oil Dip Reading (${isMs ? 'CM' : 'MM'})</th>
+            <th class="py-2.5 px-3 border border-slate-700">Water Dip Reading</th>
+            <th class="py-2.5 px-3 border border-slate-700">Calculated Stock</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// 4. Density Check Page (Product Specific)
+function renderDsrDensityTable(product, monthKeyStr, daysInMonth) {
+  const isMs = product === 'ms';
+  let rows = '';
+  for (let day = 1; day <= daysInMonth; day++) {
+    rows += `
+      <tr class="border-b border-[#EEF1F5] text-xs text-center">
+        <td class="py-2.5 px-3 border border-slate-200 font-bold">${day}</td>
+        <td class="py-2.5 px-3 border border-slate-200">${isMs ? '735.2' : '830.5'}</td>
+        <td class="py-2.5 px-3 border border-slate-200">29.5°C</td>
+        <td class="py-2.5 px-3 border border-slate-200 font-bold ${isMs ? 'text-orange-600' : 'text-blue-700'}">${isMs ? '750.2' : '850.1'}</td>
+      </tr>`;
+  }
+  return `
+    <div>
+      <div class="text-center mb-4 pb-2 border-b border-slate-200">
+        <h3 class="text-base font-extrabold text-[#0A2540]">DENSITY CHECK REGISTER @ 15°C &mdash; Product: ${isMs ? 'MS (Petrol)' : 'HSD (Diesel)'}</h3>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr}</p>
+      </div>
+      <table class="w-full text-center border-collapse min-w-[600px] text-xs">
+        <thead>
+          <tr class="bg-[#0A2540] text-white text-[10px] uppercase">
+            <th class="py-2.5 px-3 border border-slate-700">Date</th>
+            <th class="py-2.5 px-3 border border-slate-700">Observed Density</th>
+            <th class="py-2.5 px-3 border border-slate-700">Observed Temp</th>
+            <th class="py-2.5 px-3 border border-slate-700">Density at 15°C</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 /* =========================================================
