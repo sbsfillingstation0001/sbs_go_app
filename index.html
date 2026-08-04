@@ -3484,157 +3484,208 @@ function renderDsrRegister() {
 }
 
 // Clean PDF Download Function matching other Reports
-// Function to Download Complete DSR Register (MS & HSD Combined in a Single PDF)
+// Direct jsPDF Downloader: Clean Official Register Format without Fixed Footer Page Numbers
 function downloadDsrPdf() {
   try {
     const monthKeyStr = selectedReportMonth || monthKey(todayStr());
     const daysInMonth = getDaysInMonth(monthKeyStr);
+    const isMs = currentDsrProduct === 'ms';
+    const fuelTypeKey = isMs ? 'petrol' : 'diesel';
+    const productLabel = isMs ? 'MS (Petrol)' : 'HSD (Diesel)';
+    const tableToUse = isMs ? (typeof PETROL_DIP_TABLE !== 'undefined' ? PETROL_DIP_TABLE : []) : (typeof DIESEL_DIP_TABLE !== 'undefined' ? DIESEL_DIP_TABLE : []);
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
     const pageWidth = 297;
 
-    const products = [
-      { key: 'ms', label: 'MS (Petrol)' },
-      { key: 'hsd', label: 'HSD (Diesel)' }
-    ];
-
+    const subTabs = ['stockSales', 'totalizer', 'tankDip', 'density'];
     let isFirstPage = true;
 
-    products.forEach(prod => {
-      const isMs = prod.key === 'ms';
-      const fuelTypeKey = prod.key;
+    subTabs.forEach(tabId => {
+      if (!isFirstPage) {
+        doc.addPage();
+      }
+      isFirstPage = false;
 
-      const subTabs = [
-        { id: 'stockSales', title: `STOCK / SALES DETAILS — Product: ${prod.label}` },
-        { id: 'totalizer', title: `TOTALIZER READINGS — Product: ${prod.label}` },
-        { id: 'tankDip', title: `TANK DIPS (OIL / WATER) — Product: ${prod.label}` },
-        { id: 'density', title: `DENSITY CHECK REGISTER @ 15°C — Product: ${prod.label}` }
-      ];
+      let y = 12;
+      let subTabTitle = '';
+      let headColumns = [];
+      let tableRows = [];
 
-      subTabs.forEach(tab => {
-        if (!isFirstPage) {
-          doc.addPage();
+      // 1. STOCK / SALES DETAILS FORMAT
+      if (tabId === 'stockSales') {
+        subTabTitle = `STOCK / SALES DETAILS`;
+        headColumns = [
+          [
+            { content: 'Date', rowSpan: 2 },
+            { content: 'Opening Stock', rowSpan: 2 },
+            { content: 'Receipt', rowSpan: 2 },
+            { content: 'Total Stock', rowSpan: 2 },
+            { content: 'Sales by Meter', rowSpan: 2 },
+            { content: 'Pump Test', rowSpan: 2 },
+            { content: 'Net Sales by Meter', rowSpan: 2 },
+            { content: 'Cumulative Sales', rowSpan: 2 },
+            { content: 'Sales by Dip', rowSpan: 2 },
+            { content: 'Variation', colSpan: 2 },
+            { content: 'Remarks', rowSpan: 2 }
+          ],
+          ['Daily', 'Cumulative']
+        ];
+        
+        for (let day = 1; day <= daysInMonth; day++) {
+          const data = getDsrChronologicalSimulation(fuelTypeKey, monthKeyStr, day);
+          tableRows.push([
+            day,
+            data.opening,
+            data.receipt > 0 ? data.receipt : '',
+            data.total,
+            data.salesByMeter > 0 ? data.salesByMeter : '',
+            data.pumpTest > 0 ? data.pumpTest : '',
+            data.netSales > 0 ? data.netSales : '',
+            data.cumulative > 0 ? data.cumulative : '',
+            data.dipSales !== '-' ? data.dipSales : '',
+            data.dailyVar !== '-' ? data.dailyVar : '',
+            data.cumVar !== '-' ? data.cumVar : '',
+            ''
+          ]);
         }
-        isFirstPage = false;
+      } 
+      // 2. TOTALIZER READINGS FORMAT
+      else if (tabId === 'totalizer') {
+        subTabTitle = `TOTALIZER READINGS`;
+        headColumns = [
+          [
+            { content: 'Date', rowSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 },
+            { content: 'Totalizer Readings:\nD/U-SL.No.:', colSpan: 2 }
+          ],
+          ['Mechanical', 'Electronic', 'Mechanical', 'Electronic', 'Mechanical', 'Electronic', 'Mechanical', 'Electronic', 'Mechanical', 'Electronic', 'Mechanical', 'Electronic']
+        ];
 
-        let y = 15;
-
-        // Header
-        doc.setFillColor(10, 37, 64);
-        doc.rect(0, 0, pageWidth, 4, 'F');
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(16);
-        doc.setTextColor(10, 37, 64);
-        doc.text('SBS FILLING STATION — DSR REGISTER', pageWidth / 2, y, { align: 'center' });
-        y += 6;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(90, 107, 130);
-        doc.text(`${tab.title} | Month: ${monthKeyStr}`, pageWidth / 2, y, { align: 'center' });
-        y += 8;
-
-        let headColumns = [];
-        let tableRows = [];
-
-        if (tab.id === 'stockSales') {
-          headColumns = [['Date', 'Opening Stock', 'Receipt', 'Total Stock', 'Sales by Meter', 'Pump Test', 'Net Sales', 'Cumulative', 'Sales by Dip', 'Daily Var', 'Cum. Var']];
-          for (let day = 1; day <= daysInMonth; day++) {
-            const data = getDsrChronologicalSimulation(fuelTypeKey, monthKeyStr, day);
-            tableRows.push([
-              day, data.opening, data.receipt > 0 ? data.receipt : '-', data.total,
-              data.salesByMeter > 0 ? data.salesByMeter : '-', data.pumpTest > 0 ? data.pumpTest : '-',
-              data.netSales > 0 ? data.netSales : '-', data.cumulative > 0 ? data.cumulative : '-',
-              data.dipSales, data.dailyVar, data.cumVar
-            ]);
-          }
-        } else if (tab.id === 'totalizer') {
-          headColumns = [['Date', 'Nozzle 1 End Meter', 'Nozzle 2 End Meter', 'Nozzle 3 End Meter', 'Daily Total Sold (L)']];
-          for (let day = 1; day <= daysInMonth; day++) {
-            const dayStr = `${monthKeyStr}-${String(day).padStart(2, '0')}`;
-            const rec = state.dailyRecords ? state.dailyRecords[dayStr] : null;
-            let nozzleEnds = ['-', '-', '-'];
-            let dayTotalSold = 0;
-            let nozzleIdx = 0;
-
-            if (typeof NOZZLES !== 'undefined' && Array.isArray(NOZZLES)) {
-              NOZZLES.forEach(nz => {
-                if (NOZZLE_FUEL && NOZZLE_FUEL[nz] === fuelTypeKey && nozzleIdx < 3) {
-                  let endVal = '-';
-                  if (rec && typeof rec === 'object') {
-                    ['evening', 'morning'].forEach(shiftName => {
-                      const shift = rec[shiftName];
-                      if (shift && shift.nozzles && shift.nozzles[nz]) {
-                        const nData = shift.nozzles[nz];
-                        if (nData && nData.end !== null && nData.end !== undefined && nData.end !== '') {
-                          if (endVal === '-') endVal = Math.round(parseFloat(nData.end) || 0);
-                        }
-                        const start = parseFloat(nData?.start) || 0;
-                        const end = parseFloat(nData?.end) || 0;
-                        const test = parseFloat(nData?.testing) || 0;
-                        dayTotalSold += Math.max(0, (end - start) - test);
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dayStr = `${monthKeyStr}-${String(day).padStart(2, '0')}`;
+          const rec = state.dailyRecords ? state.dailyRecords[dayStr] : null;
+          let rowData = [day];
+          
+          let nozzleCount = 0;
+          if (typeof NOZZLES !== 'undefined' && Array.isArray(NOZZLES)) {
+            NOZZLES.forEach(nz => {
+              if (NOZZLE_FUEL && NOZZLE_FUEL[nz] === fuelTypeKey && nozzleCount < 6) {
+                let endVal = '';
+                if (rec && typeof rec === 'object') {
+                  ['evening', 'morning'].forEach(shiftName => {
+                    const shift = rec[shiftName];
+                    if (shift && shift.nozzles && shift.nozzles[nz]) {
+                      const nData = shift.nozzles[nz];
+                      if (nData && nData.end !== null && nData.end !== undefined && nData.end !== '') {
+                        if (endVal === '') endVal = Math.round(parseFloat(nData.end) || 0);
                       }
-                    });
-                  }
-                  nozzleEnds[nozzleIdx] = endVal;
-                  nozzleIdx++;
+                    }
+                  });
                 }
-              });
-            }
-            tableRows.push([day, nozzleEnds[0], nozzleEnds[1], nozzleEnds[2], Math.round(dayTotalSold) > 0 ? Math.round(dayTotalSold) : '-']);
+                rowData.push(endVal, '');
+                nozzleCount++;
+              }
+            });
           }
-        } else if (tab.id === 'tankDip') {
-          const unitLabel = isMs ? 'CM' : 'MM';
-          const tableToUse = isMs ? (typeof PETROL_DIP_TABLE !== 'undefined' ? PETROL_DIP_TABLE : []) : (typeof DIESEL_DIP_TABLE !== 'undefined' ? DIESEL_DIP_TABLE : []);
-          headColumns = [[`Date`, `Oil Dip Reading (${unitLabel})`, 'Water Dip Reading', 'Calculated Stock']];
-
-          for (let day = 1; day <= daysInMonth; day++) {
-            const data = getDsrChronologicalSimulation(fuelTypeKey, monthKeyStr, day);
-            const dipReading = (data.total > 0) ? getDipFromOfficialTable(tableToUse, data.total) : '-';
-            tableRows.push([day, dipReading, '-', (data.total > 0) ? data.total + ' L' : '-']);
+          while (rowData.length < 13) {
+            rowData.push('', '');
           }
-        } else if (tab.id === 'density') {
-          headColumns = [['Date', 'Observed Density', 'Observed Temp', 'Density at 15°C']];
-          for (let day = 1; day <= daysInMonth; day++) {
-            const baseDensity = isMs ? 735.0 : 832.0;
-            const dayVariation = ((day * 3 + (isMs ? 2 : 4)) % 7) - 3;
-            const obsDensity = (baseDensity + (dayVariation * 0.2)).toFixed(1);
-            const baseTemp = 28.5;
-            const tempVariation = ((day * 2) % 5) - 2;
-            const obsTemp = (baseTemp + (tempVariation * 0.4)).toFixed(1);
-            const tempDiff = parseFloat(obsTemp) - 15.0;
-            const correctionFactor = tempDiff * (isMs ? 0.65 : 0.68);
-            const densityAt15 = (parseFloat(obsDensity) + correctionFactor).toFixed(1);
-
-            tableRows.push([day, obsDensity, `${obsTemp} °C`, densityAt15]);
-          }
+          tableRows.push(rowData);
         }
+      } 
+      // 3. TANK DIPS FORMAT
+      else if (tabId === 'tankDip') {
+        subTabTitle = `TANK DIPS (OIL/WATER DIPS)`;
+        headColumns = [
+          [
+            { content: 'Date', rowSpan: 2 },
+            { content: 'Product:\nTank No:', colSpan: 3 }
+          ],
+          ['Oil Dip', 'Water Dip', 'Stock']
+        ];
 
-        doc.autoTable({
-          startY: y,
-          margin: { left: 10, right: 10 },
-          head: headColumns,
-          body: tableRows,
-          theme: 'grid',
-          headStyles: { fillColor: [10, 37, 64], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-          bodyStyles: { fontSize: 8, textColor: [30, 41, 59], halign: 'center' },
-          styles: { cellPadding: 2 }
-        });
+        for (let day = 1; day <= daysInMonth; day++) {
+          const data = getDsrChronologicalSimulation(fuelTypeKey, monthKeyStr, day);
+          const dipReading = (data.total > 0) ? getDipFromOfficialTable(tableToUse, data.total) : '';
+          const stockVal = (data.total > 0) ? data.total : '';
+          
+          tableRows.push([
+            day, 
+            dipReading, '', stockVal
+          ]);
+        }
+      } 
+      // 4. DENSITY CHECK FORMAT
+      else if (tabId === 'density') {
+        subTabTitle = `DENSITY CHECK @ 15°C`;
+        headColumns = [[
+          'Dip No.', 'Observed Density', 'Observed Temp (°C)', 'Density at 15°C'
+        ]];
 
-        const finalY = doc.lastAutoTable.finalY + 10;
-        doc.setFontSize(8.5);
-        doc.setTextColor(148, 163, 184);
-        doc.setFont('helvetica', 'italic');
-        doc.text('Generated automatically by SBS Filling Station OS', pageWidth / 2, finalY, { align: 'center' });
+        for (let day = 1; day <= daysInMonth; day++) {
+          const baseDensity = isMs ? 735.0 : 832.0;
+          const obsDensity = (baseDensity + (((day * 3) % 7) - 3) * 0.2).toFixed(1);
+          const obsTemp = (28.5 + (((day * 2) % 5) - 2) * 0.4).toFixed(1);
+          const densityAt15 = (parseFloat(obsDensity) + (parseFloat(obsTemp) - 15.0) * (isMs ? 0.65 : 0.68)).toFixed(1);
+
+          tableRows.push([
+            day, obsDensity, `${obsTemp} °C`, densityAt15
+          ]);
+        }
+      }
+
+      // --- Top Register Header info ---
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(subTabTitle, 14, y);
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Product: ${productLabel}`, 95, y);
+      doc.text(`Tank Capacity: _________`, 155, y);
+      doc.text(`Month: ${monthKeyStr}  - 1`, 230, y);
+      y += 4;
+
+      // --- Official Clean Black & White Grid Table ---
+      doc.autoTable({
+        startY: y,
+        margin: { left: 10, right: 10, bottom: 10 },
+        head: headColumns,
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { 
+          fillColor: [255, 255, 255], 
+          textColor: [0, 0, 0], 
+          fontStyle: 'bold', 
+          fontSize: 7.5, 
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0.2,
+          lineColor: [0, 0, 0]
+        },
+        bodyStyles: { 
+          fontSize: 7.5, 
+          textColor: [0, 0, 0], 
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0.2,
+          lineColor: [0, 0, 0],
+          cellPadding: 1.2
+        },
+        styles: { overflow: 'linebreak' }
       });
     });
 
-    doc.save(`Complete_DSR_Register_${monthKeyStr}.pdf`);
+    doc.save(`DSR_Register_${currentDsrProduct.toUpperCase()}_${monthKeyStr}.pdf`);
   } catch (err) {
     console.error(err);
-    alert('Complete DSR PDF Generate hone mein error aaya: ' + err.message);
+    alert('PDF Generate karne mein error aaya: ' + err.message);
   }
 }
 // Helper: Chronological Continuous Simulation Engine with Exact Testing Sum
