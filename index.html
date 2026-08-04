@@ -3434,7 +3434,7 @@ function renderDsrRegister() {
    RENDER: DSR
 ========================================================= */
 /* =========================================================
-   DSR REGISTER & PHYSICAL RECORD SYSTEM (FINAL LOGIC & PDF)
+   DSR REGISTER & PHYSICAL RECORD SYSTEM (CRASH-PROOF FIX)
 ========================================================= */
 
 let currentDsrProduct = 'ms'; // 'ms' or 'hsd'
@@ -3483,7 +3483,7 @@ function renderDsrRegister() {
   </div>`;
 }
 
-// Clean PDF Download Function matching other Reports
+// Clean PDF Download Function
 function downloadDsrPdf() {
   const printArea = document.getElementById('reportPrintArea');
   if (!printArea) return;
@@ -3502,17 +3502,17 @@ function downloadDsrPdf() {
   }
 }
 
-// Helper: Chronological Continuous Simulation Engine with Correct Net Sales & Sales by Meter Logic
+// Helper: Chronological Continuous Simulation Engine with Safe Optional Chaining
 function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) {
-  const initialStock = fuelTypeKey === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 1050) : (parseFloat(state.settings.initialDieselStock) || 1389);
+  const initialStock = fuelTypeKey === 'petrol' ? (parseFloat(state.settings?.initialPetrolStock) || 1050) : (parseFloat(state.settings?.initialDieselStock) || 1389);
   
   let startDates = [];
-  if (state.deliveries) {
+  if (state.deliveries && typeof state.deliveries === 'object') {
     Object.values(state.deliveries).forEach(d => {
       if (d && d.date && d.fuelType === fuelTypeKey) startDates.push(d.date);
     });
   }
-  if (state.dailyRecords) {
+  if (state.dailyRecords && typeof state.dailyRecords === 'object') {
     Object.keys(state.dailyRecords).forEach(dt => startDates.push(dt));
   }
   
@@ -3536,7 +3536,7 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
     const dateStr = `${yyyy}-${mm}-${dd}`;
 
     let receiptLiters = 0;
-    if (state.deliveries) {
+    if (state.deliveries && typeof state.deliveries === 'object') {
       Object.values(state.deliveries).forEach(d => {
         if (d && d.date === dateStr && d.fuelType === fuelTypeKey) {
           receiptLiters += Math.round(parseFloat(d.liters) || 0);
@@ -3547,30 +3547,31 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
     let exactSoldLiters = 0;
     let rawPumpTest = 0;
     const rec = state.dailyRecords ? state.dailyRecords[dateStr] : null;
-    if (rec) {
+    if (rec && typeof rec === 'object') {
       ['morning', 'evening'].forEach(shiftName => {
         const shift = rec[shiftName];
-        if (shift && shift.nozzles) {
-          NOZZLES.forEach(nz => {
-            if (NOZZLE_FUEL[nz] === fuelTypeKey) {
-              const nzData = shift.nozzles[nz];
-              // Exact sold liters from shift entry before rounding
-              const start = parseFloat(nzData.start) || 0;
-              const end = parseFloat(nzData.end) || 0;
-              const test = parseFloat(nzData.testing) || 0;
-              const sold = Math.max(0, (end - start) - test);
-              exactSoldLiters += sold;
-              rawPumpTest += test;
-            }
-          });
+        if (shift && shift.nozzles && typeof shift.nozzles === 'object') {
+          if (typeof NOZZLES !== 'undefined' && Array.isArray(NOZZLES)) {
+            NOZZLES.forEach(nz => {
+              if (NOZZLE_FUEL && NOZZLE_FUEL[nz] === fuelTypeKey) {
+                const nzData = shift.nozzles[nz];
+                if (nzData) {
+                  const start = parseFloat(nzData.start) || 0;
+                  const end = parseFloat(nzData.end) || 0;
+                  const test = parseFloat(nzData.testing) || 0;
+                  const sold = Math.max(0, (end - start) - test);
+                  exactSoldLiters += sold;
+                  rawPumpTest += test;
+                }
+              }
+            });
+          }
         }
       });
     }
 
-    // Net Sales = Rounded actual liters sold
     const netSales = Math.round(exactSoldLiters);
     const pumpTest = Math.round(rawPumpTest);
-    // Sales by Meter = Net Sales + Pump Test
     const salesByMeter = netSales + pumpTest;
 
     const openingStock = Math.round(runningStock);
@@ -3684,25 +3685,30 @@ function renderDsrTotalizerTable(product, monthKeyStr, daysInMonth) {
     let dayTotalSold = 0;
     let nozzleIdx = 0;
 
-    NOZZLES.forEach(nz => {
-      if (NOZZLE_FUEL[nz] === fuelTypeKey && nozzleIdx < 3) {
-        let endVal = '-';
-        if (rec) {
-          ['evening', 'morning'].forEach(shiftName => {
-            const shift = rec[shiftName];
-            if (shift && shift.nozzles && shift.nozzles[nz]) {
-              const nData = shift.nozzles[nz];
-              if (nData.end !== null && nData.end !== undefined && nData.end !== '') {
-                if (endVal === '-') endVal = Math.round(parseFloat(nData.end) || 0);
+    if (typeof NOZZLES !== 'undefined' && Array.isArray(NOZZLES)) {
+      NOZZLES.forEach(nz => {
+        if (NOZZLE_FUEL && NOZZLE_FUEL[nz] === fuelTypeKey && nozzleIdx < 3) {
+          let endVal = '-';
+          if (rec && typeof rec === 'object') {
+            ['evening', 'morning'].forEach(shiftName => {
+              const shift = rec[shiftName];
+              if (shift && shift.nozzles && shift.nozzles[nz]) {
+                const nData = shift.nozzles[nz];
+                if (nData && nData.end !== null && nData.end !== undefined && nData.end !== '') {
+                  if (endVal === '-') endVal = Math.round(parseFloat(nData.end) || 0);
+                }
+                const start = parseFloat(nData?.start) || 0;
+                const end = parseFloat(nData?.end) || 0;
+                const test = parseFloat(nData?.testing) || 0;
+                dayTotalSold += Math.max(0, (end - start) - test);
               }
-              dayTotalSold += computeNozzleRawLiters(nData);
-            }
-          });
+            });
+          }
+          nozzleEnds[nozzleIdx] = endVal;
+          nozzleIdx++;
         }
-        nozzleEnds[nozzleIdx] = endVal;
-        nozzleIdx++;
-      }
-    });
+      });
+    }
 
     dayTotalSold = Math.round(dayTotalSold);
 
@@ -3739,9 +3745,9 @@ function renderDsrTotalizerTable(product, monthKeyStr, daysInMonth) {
     </div>`;
 }
 
-// Helper to find exact CM/MM from Official Dip Table corresponding to Total Stock
+// Helper to find exact CM/MM from Official Dip Table
 function getDipFromOfficialTable(table, targetStock) {
-  if (isNaN(targetStock) || targetStock <= 0) return '-';
+  if (!table || !Array.isArray(table) || isNaN(targetStock) || targetStock <= 0) return '-';
   let bestCm = table[0][0];
   let minDiff = Math.abs(table[0][1] - targetStock);
 
@@ -3759,7 +3765,7 @@ function getDipFromOfficialTable(table, targetStock) {
 function renderDsrTankDipTable(product, monthKeyStr, daysInMonth) {
   const isMs = product === 'ms';
   const fuelTypeKey = isMs ? 'petrol' : 'diesel';
-  const tableToUse = isMs ? PETROL_DIP_TABLE : DIESEL_DIP_TABLE;
+  const tableToUse = isMs ? (typeof PETROL_DIP_TABLE !== 'undefined' ? PETROL_DIP_TABLE : []) : (typeof DIESEL_DIP_TABLE !== 'undefined' ? DIESEL_DIP_TABLE : []);
   const unitLabel = isMs ? 'CM' : 'MM';
   let rows = '';
 
