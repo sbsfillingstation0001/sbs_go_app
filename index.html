@@ -3484,7 +3484,7 @@ function renderDsrRegister() {
 }
 
 // Clean PDF Download Function matching other Reports
-// Direct jsPDF Downloader: Clean Official Register Format without Fixed Footer Page Numbers
+// Direct jsPDF Downloader: Fits entire month (all 31 rows + header) strictly on a single A4 landscape page per sub-tab
 function downloadDsrPdf() {
   try {
     const monthKeyStr = selectedReportMonth || monthKey(todayStr());
@@ -3507,7 +3507,7 @@ function downloadDsrPdf() {
       }
       isFirstPage = false;
 
-      let y = 12;
+      let y = 10;
       let subTabTitle = '';
       let headColumns = [];
       let tableRows = [];
@@ -3641,21 +3641,21 @@ function downloadDsrPdf() {
 
       // --- Top Register Header info ---
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
+      doc.setFontSize(11);
       doc.setTextColor(0, 0, 0);
       doc.text(subTabTitle, 14, y);
 
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
       doc.text(`Product: ${productLabel}`, 95, y);
       doc.text(`Tank Capacity: _________`, 155, y);
       doc.text(`Month: ${monthKeyStr}  - 1`, 230, y);
-      y += 4;
+      y += 3.5;
 
-      // --- Official Clean Black & White Grid Table ---
+      // --- Compact Single Page AutoTable ---
       doc.autoTable({
         startY: y,
-        margin: { left: 10, right: 10, bottom: 10 },
+        margin: { left: 10, right: 10, top: 10, bottom: 5 },
         head: headColumns,
         body: tableRows,
         theme: 'grid',
@@ -3663,20 +3663,21 @@ function downloadDsrPdf() {
           fillColor: [255, 255, 255], 
           textColor: [0, 0, 0], 
           fontStyle: 'bold', 
-          fontSize: 7.5, 
+          fontSize: 7, 
           halign: 'center',
           valign: 'middle',
-          lineWidth: 0.2,
-          lineColor: [0, 0, 0]
+          lineWidth: 0.15,
+          lineColor: [0, 0, 0],
+          cellPadding: 1
         },
         bodyStyles: { 
-          fontSize: 7.5, 
+          fontSize: 7, 
           textColor: [0, 0, 0], 
           halign: 'center',
           valign: 'middle',
-          lineWidth: 0.2,
+          lineWidth: 0.15,
           lineColor: [0, 0, 0],
-          cellPadding: 1.2
+          cellPadding: 0.9
         },
         styles: { overflow: 'linebreak' }
       });
