@@ -651,6 +651,9 @@ function getCarryForwardRate(fuelType, date, currentShiftName) {
   return state.settings[fuelType + 'Rate'];
 }
   
+/* =========================================================
+   FIXED: GET LAST KNOWN METER READING (NOZZLE SPECIFIC)
+========================================================= */
 function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
   const rec = state.dailyRecords && state.dailyRecords[date];
   
@@ -664,7 +667,7 @@ function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
     }
   }
 
-  // 2. Prior Days Check: Pichle sabhi dino ki Sabse Latest END Reading dhoondho
+  // 2. Prior Days Check: Pichle sabhi dino mein se USI nozzle ki sabse latest valid END reading dhoondho
   if (state.dailyRecords && typeof state.dailyRecords === 'object') {
     const priorDates = Object.keys(state.dailyRecords)
       .filter(function(d) { return d < date; })
@@ -675,10 +678,10 @@ function getLastKnownMeterReading(nozzleId, date, currentShiftName) {
       const r = state.dailyRecords[priorDates[i]];
       if (!r) continue;
       
-      // Evening shift pehle check karo, fir Morning shift
       const shiftsInOrder = [r.evening, r.morning].filter(Boolean);
       for (let j = 0; j < shiftsInOrder.length; j++) {
         const shift = shiftsInOrder[j];
+        // Check karo ki is shift mein is specific nozzle ka end meter maujood hai ya nahi
         if (shift && shift.nozzles && shift.nozzles[nozzleId]) {
           const prevEnd = shift.nozzles[nozzleId].end;
           if (prevEnd !== null && prevEnd !== undefined && prevEnd !== '') {
