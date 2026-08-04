@@ -3434,7 +3434,7 @@ function renderDsrRegister() {
    RENDER: DSR
 ========================================================= */
 /* =========================================================
-   DSR REGISTER & PHYSICAL RECORD SYSTEM (PUMP TEST FIXED)
+   DSR REGISTER & PHYSICAL RECORD SYSTEM (FINAL LOGIC & PDF)
 ========================================================= */
 
 let currentDsrProduct = 'ms'; // 'ms' or 'hsd'
@@ -3483,12 +3483,26 @@ function renderDsrRegister() {
   </div>`;
 }
 
-// Function to trigger clean download view
+// Clean PDF Download Function matching other Reports
 function downloadDsrPdf() {
-  window.print();
+  const printArea = document.getElementById('reportPrintArea');
+  if (!printArea) return;
+
+  if (typeof html2pdf !== 'undefined') {
+    const opt = {
+      margin: 10,
+      filename: `DSR_Register_${currentDsrProduct.toUpperCase()}_${selectedReportMonth || 'current'}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+    };
+    html2pdf().from(printArea).set(opt).save();
+  } else {
+    window.print();
+  }
 }
 
-// Helper: Chronological Continuous Simulation Engine with Corrected Pump Test Fetching
+// Helper: Chronological Continuous Simulation Engine with Correct Net Sales & Sales by Meter Logic
 function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) {
   const initialStock = fuelTypeKey === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 1050) : (parseFloat(state.settings.initialDieselStock) || 1389);
   
@@ -3530,7 +3544,7 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
       });
     }
 
-    let rawNetSales = 0;
+    let exactSoldLiters = 0;
     let rawPumpTest = 0;
     const rec = state.dailyRecords ? state.dailyRecords[dateStr] : null;
     if (rec) {
@@ -3540,16 +3554,23 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
           NOZZLES.forEach(nz => {
             if (NOZZLE_FUEL[nz] === fuelTypeKey) {
               const nzData = shift.nozzles[nz];
-              rawNetSales += computeNozzleRawLiters(nzData);
-              rawPumpTest += computeNozzleTestLiters(nzData);
+              // Exact sold liters from shift entry before rounding
+              const start = parseFloat(nzData.start) || 0;
+              const end = parseFloat(nzData.end) || 0;
+              const test = parseFloat(nzData.testing) || 0;
+              const sold = Math.max(0, (end - start) - test);
+              exactSoldLiters += sold;
+              rawPumpTest += test;
             }
           });
         }
       });
     }
 
-    const netSales = Math.round(rawNetSales);
+    // Net Sales = Rounded actual liters sold
+    const netSales = Math.round(exactSoldLiters);
     const pumpTest = Math.round(rawPumpTest);
+    // Sales by Meter = Net Sales + Pump Test
     const salesByMeter = netSales + pumpTest;
 
     const openingStock = Math.round(runningStock);
