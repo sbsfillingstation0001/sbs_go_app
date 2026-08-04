@@ -3434,7 +3434,7 @@ function renderDsrRegister() {
    RENDER: DSR
 ========================================================= */
 /* =========================================================
-   DSR REGISTER & PHYSICAL RECORD SYSTEM (FINAL CORRECTED)
+   DSR REGISTER & PHYSICAL RECORD SYSTEM (PUMP TEST FIXED)
 ========================================================= */
 
 let currentDsrProduct = 'ms'; // 'ms' or 'hsd'
@@ -3446,14 +3446,14 @@ function renderDsrRegister() {
 
   return `
   <div class="space-y-4">
-    <!-- Top Month Selector & Print Bar -->
+    <!-- Top Month Selector & Download PDF Bar -->
     <div class="bg-white rounded-2xl card-shadow p-4 flex flex-wrap items-center justify-between gap-3 no-print">
       <div>
         <label class="text-xs font-semibold text-[#5A6B82]">Select Month for DSR Register</label>
         <input type="month" value="${monthKeyStr}" onchange="selectedReportMonth = this.value; render();"
           class="block mt-1 border border-[#DCE3EC] rounded-lg px-3 py-2 font-semibold">
       </div>
-      <button onclick="window.print()" class="bg-[#0A2540] text-white font-bold px-4 py-2 rounded-lg text-xs">🖨️ Print Active Register Page</button>
+      <button onclick="downloadDsrPdf()" class="bg-[#F5A623] text-[#0A2540] font-extrabold px-5 py-2.5 rounded-xl text-xs shadow-md hover:bg-[#e0961b] transition-all flex items-center gap-2">📥 Download DSR PDF</button>
     </div>
 
     <!-- Product Selector -->
@@ -3483,11 +3483,15 @@ function renderDsrRegister() {
   </div>`;
 }
 
-// Helper: Chronological Continuous Simulation Engine for Stock
+// Function to trigger clean download view
+function downloadDsrPdf() {
+  window.print();
+}
+
+// Helper: Chronological Continuous Simulation Engine with Corrected Pump Test Fetching
 function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) {
   const initialStock = fuelTypeKey === 'petrol' ? (parseFloat(state.settings.initialPetrolStock) || 1050) : (parseFloat(state.settings.initialDieselStock) || 1389);
   
-  // Find earliest delivery date or record date to start simulation
   let startDates = [];
   if (state.deliveries) {
     Object.values(state.deliveries).forEach(d => {
@@ -3498,7 +3502,7 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
     Object.keys(state.dailyRecords).forEach(dt => startDates.push(dt));
   }
   
-  if (startDates.length === 0) return { opening: initialStock, receipt: 0, total: initialStock, netSales: 0, dipSales: 0, var: 0 };
+  if (startDates.length === 0) return { opening: initialStock, receipt: 0, total: initialStock, netSales: 0, pumpTest: 0, salesByMeter: 0, cumulative: 0, dipSales: '-', dailyVar: '-', cumVar: '-' };
 
   startDates.sort();
   const earliestDateStr = startDates[0];
@@ -3509,7 +3513,7 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
   let cumulativeSales = 0;
   let cumulativeVar = 0;
 
-  let targetDayData = { opening: initialStock, receipt: 0, total: initialStock, netSales: 0, cumulative: 0, dipSales: '-', dailyVar: '-', cumVar: '-' };
+  let targetDayData = { opening: initialStock, receipt: 0, total: initialStock, netSales: 0, pumpTest: 0, salesByMeter: 0, cumulative: 0, dipSales: '-', dailyVar: '-', cumVar: '-' };
 
   while (currDate <= targetDateObj) {
     const yyyy = currDate.getFullYear();
@@ -3517,7 +3521,6 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
     const dd = String(currDate.getDate()).padStart(2, '0');
     const dateStr = `${yyyy}-${mm}-${dd}`;
 
-    // 1. Receipts on this date
     let receiptLiters = 0;
     if (state.deliveries) {
       Object.values(state.deliveries).forEach(d => {
@@ -3527,9 +3530,8 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
       });
     }
 
-    // 2. Sales & Test on this date
-    let salesByMeter = 0;
-    let pumpTest = 0;
+    let rawNetSales = 0;
+    let rawPumpTest = 0;
     const rec = state.dailyRecords ? state.dailyRecords[dateStr] : null;
     if (rec) {
       ['morning', 'evening'].forEach(shiftName => {
@@ -3538,37 +3540,36 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
           NOZZLES.forEach(nz => {
             if (NOZZLE_FUEL[nz] === fuelTypeKey) {
               const nzData = shift.nozzles[nz];
-              salesByMeter += computeNozzleRawLiters(nzData);
-              pumpTest += computeNozzleTestLiters(nzData);
+              rawNetSales += computeNozzleRawLiters(nzData);
+              rawPumpTest += computeNozzleTestLiters(nzData);
             }
           });
         }
       });
     }
 
-    salesByMeter = Math.round(salesByMeter);
-    pumpTest = Math.round(pumpTest);
-    const netSales = Math.max(0, salesByMeter - pumpTest);
+    const netSales = Math.round(rawNetSales);
+    const pumpTest = Math.round(rawPumpTest);
+    const salesByMeter = netSales + pumpTest;
 
     const openingStock = Math.round(runningStock);
     const totalStock = openingStock + receiptLiters;
 
-    let actualNetSales = (salesByMeter > 0 || pumpTest > 0) ? netSales : 0;
+    let actualNetSales = (netSales > 0 || pumpTest > 0) ? netSales : 0;
+    let actualPumpTest = (actualNetSales > 0) ? pumpTest : 0;
+    let actualSalesByMeter = (actualNetSales > 0) ? salesByMeter : 0;
     
     let dailyVar = 0;
     let salesByDip = '-';
     if (actualNetSales > 0) {
       cumulativeSales += actualNetSales;
-      // Random variation -3 to +3
       const seed = (currDate.getDate() * 11 + (fuelTypeKey === 'petrol' ? 5 : 17)) % 7;
-      dailyVar = seed - 3; // -3 to +3
+      dailyVar = seed - 3;
       salesByDip = actualNetSales + dailyVar;
-      // Exact Formula: Daily Var = Net Sales - Sales by Dip
       dailyVar = actualNetSales - salesByDip;
       cumulativeVar += dailyVar;
     }
 
-    // Closing stock deducted by Sales by Dip as per dealer rules
     const deduction = (salesByDip !== '-') ? salesByDip : actualNetSales;
     runningStock = totalStock - deduction;
 
@@ -3578,6 +3579,8 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
         receipt: receiptLiters,
         total: totalStock,
         netSales: actualNetSales,
+        pumpTest: actualPumpTest,
+        salesByMeter: actualSalesByMeter,
         cumulative: actualNetSales > 0 ? cumulativeSales : 0,
         dipSales: salesByDip,
         dailyVar: actualNetSales > 0 ? dailyVar : '-',
@@ -3607,8 +3610,8 @@ function renderDsrStockSalesTable(product, monthKeyStr, daysInMonth) {
         <td class="py-2.5 px-2 border border-slate-200">${data.opening}</td>
         <td class="py-2.5 px-2 border border-slate-200 text-emerald-600 font-semibold">${data.receipt > 0 ? data.receipt : '-'}</td>
         <td class="py-2.5 px-2 border border-slate-200 font-semibold">${data.total}</td>
-        <td class="py-2.5 px-2 border border-slate-200">${data.netSales > 0 ? data.netSales : '-'}</td>
-        <td class="py-2.5 px-2 border border-slate-200">-</td>
+        <td class="py-2.5 px-2 border border-slate-200 font-semibold text-slate-800">${data.salesByMeter > 0 ? data.salesByMeter : '-'}</td>
+        <td class="py-2.5 px-2 border border-slate-200">${data.pumpTest > 0 ? data.pumpTest : '-'}</td>
         <td class="py-2.5 px-2 border border-slate-200 font-bold ${isMs ? 'text-orange-600' : 'text-blue-700'}">${data.netSales > 0 ? data.netSales : '-'}</td>
         <td class="py-2.5 px-2 border border-slate-200 font-bold">${data.cumulative > 0 ? data.cumulative : '-'}</td>
         <td class="py-2.5 px-2 border border-slate-200">${data.dipSales}</td>
@@ -3621,7 +3624,7 @@ function renderDsrStockSalesTable(product, monthKeyStr, daysInMonth) {
     <div>
       <div class="text-center mb-4 pb-2 border-b border-slate-200">
         <h3 class="text-base font-extrabold text-[#0A2540]">STOCK / SALES DETAILS &mdash; Product: ${isMs ? 'MS (Petrol)' : 'HSD (Diesel)'}</h3>
-        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr} (Continuous Stock & True Formula)</p>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr}</p>
       </div>
       <table class="w-full text-center border-collapse min-w-[850px] text-xs">
         <thead>
@@ -3731,11 +3734,12 @@ function getDipFromOfficialTable(table, targetStock) {
   return bestCm;
 }
 
-// 3. Tank Dips Page (Auto-synced with Total Stock & Official Tables)
+// 3. Tank Dips Page (Petrol in CM, Diesel in MM)
 function renderDsrTankDipTable(product, monthKeyStr, daysInMonth) {
   const isMs = product === 'ms';
   const fuelTypeKey = isMs ? 'petrol' : 'diesel';
   const tableToUse = isMs ? PETROL_DIP_TABLE : DIESEL_DIP_TABLE;
+  const unitLabel = isMs ? 'CM' : 'MM';
   let rows = '';
 
   for (let day = 1; day <= daysInMonth; day++) {
@@ -3756,13 +3760,13 @@ function renderDsrTankDipTable(product, monthKeyStr, daysInMonth) {
     <div>
       <div class="text-center mb-4 pb-2 border-b border-slate-200">
         <h3 class="text-base font-extrabold text-[#0A2540]">TANK DIPS (OIL / WATER) &mdash; Product: ${isMs ? 'MS (Petrol Tank)' : 'HSD (Diesel Tank)'}</h3>
-        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr} (Matched with Official Dip Tables)</p>
+        <p class="text-xs text-[#5A6B82]">Month: ${monthKeyStr} (Oil Dip in ${unitLabel})</p>
       </div>
       <table class="w-full text-center border-collapse min-w-[600px] text-xs">
         <thead>
           <tr class="bg-[#0A2540] text-white text-[10px] uppercase">
             <th class="py-2.5 px-3 border border-slate-700">Date</th>
-            <th class="py-2.5 px-3 border border-slate-700">Oil Dip Reading (${isMs ? 'CM' : 'MM'})</th>
+            <th class="py-2.5 px-3 border border-slate-700">Oil Dip Reading (${unitLabel})</th>
             <th class="py-2.5 px-3 border border-slate-700">Water Dip Reading</th>
             <th class="py-2.5 px-3 border border-slate-700">Calculated Stock</th>
           </tr>
