@@ -852,19 +852,27 @@ function computeDayTotals(date) {
   return out;
 }
 function consumeFIFO(lots, dispensedLiters, soldLiters, rate) {
-  let remaining = dispensedLiters;
-  let cost = 0;
+  // Inventory (lots) hamesha actual sold liters ke hisab se ghategi, dispensed ya testing ke hisab se nahi
+  let remainingToConsume = soldLiters > 0 ? soldLiters : dispensedLiters;
+  let totalCost = 0;
+
   for (const lot of lots) {
-    if (remaining <= 0) break;
+    if (remainingToConsume <= 0) break;
     if (lot.remaining <= 0) continue;
-    const take = Math.min(lot.remaining, remaining);
-    cost += take * lot.cost;
-    lot.remaining -= take;
-    remaining -= take;
+
+    const take = Math.min(lot.remaining, remainingToConsume);
+    totalCost += take * lot.cost;
+    lot.remaining -= take; // Lot se sirf utna hi stock kam hoga jitna actual mein bika hai
+    remainingToConsume -= take;
   }
-  const revenue = soldLiters * rate;
-  return revenue - cost;
+
+  // Agar soldLiters diya hai toh revenue usse niklega, warna dispensed se
+  const effectiveSold = soldLiters > 0 ? soldLiters : dispensedLiters;
+  const revenue = effectiveSold * rate;
+
+  return revenue - totalCost; // Gross Profit (Revenue - Cost of Goods Sold)
 }
+
 function runFIFOEngine() {
   const deliveriesArr = Object.values(state.deliveries);
   const dateSet = new Set([...Object.keys(state.dailyRecords), ...deliveriesArr.map(d => d.date)]);
@@ -3713,6 +3721,7 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
   let runningStock = initialStock;
   let cumulativeSales = 0;
   let cumulativeVar = 0;
+  let lastProcessedMonth = ''; // Track month change to reset cumulative on 1st of every month
 
   let targetDayData = { opening: initialStock, receipt: 0, total: initialStock, netSales: 0, pumpTest: 0, salesByMeter: 0, cumulative: 0, dipSales: '-', dailyVar: '-', cumVar: '-' };
 
@@ -3721,6 +3730,16 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
     const mm = String(currDate.getMonth() + 1).padStart(2, '0');
     const dd = String(currDate.getDate()).padStart(2, '0');
     const dateStr = `${yyyy}-${mm}-${dd}`;
+    const currentMonthKey = `${yyyy}-${mm}`;
+
+    // 🔥 Reset cumulative counters if month changes (e.g., entering August fresh from July)
+    if (currentMonthKey !== lastProcessedMonth) {
+      if (dd === '01') {
+        cumulativeSales = 0;
+        cumulativeVar = 0;
+      }
+      lastProcessedMonth = currentMonthKey;
+    }
 
     let receiptLiters = 0;
     if (state.deliveries && typeof state.deliveries === 'object') {
@@ -3745,7 +3764,6 @@ function getDsrChronologicalSimulation(fuelTypeKey, targetYearMonth, targetDay) 
                 if (nzData) {
                   const start = parseFloat(nzData.start) || 0;
                   const end = parseFloat(nzData.end) || 0;
-                  // Direct mapping to testing field from shift entry
                   const test = parseFloat(nzData.testing) || parseFloat(nzData.test) || 0;
                   const sold = Math.max(0, (end - start) - test);
                   exactSoldLiters += sold;
